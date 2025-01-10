@@ -1,0 +1,180 @@
+#!/bin/bash
+
+__DEBUG_LOG_FILE="$(basename "${BASH_SOURCE[0]}").log"
+# shellcheck source=scripts/_debug_output
+# source ~/scripts/_debug_output
+
+# Source the script '.common-functions.sh'.
+SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &> /dev/null && pwd)
+ROOT_DIR=$(grep --only-matching "^.*scripts[^/]*" <<< "$SCRIPT_DIR")
+source "$ROOT_DIR/.common-functions.sh"
+
+get_file_extension() {
+    local FILE="$1"
+    if [[ -f $FILE ]]; then
+        echo "${FILE##*.}"
+    fi
+}
+
+guess_file_type() {
+    local FILE
+    FILE=$(basename "$1")
+    if [[ $FILE =~ (.*)([Ss][0-9][0-9][Ee][0-9][0-9])(.*) ]]; then # TV Show File
+        echo "TV Show"
+    elif [[ $FILE =~ (.*)([1,2][0,9][0-9]{2})(.*) ]]; then # Film File
+        echo "Film"
+    else
+        echo "Unknown"
+    fi
+}
+
+rename_file() {
+    local FILE="$1"
+    local NEW_FILE_NAME="$2"
+    local EXTENSION="$3"
+    local FILE_PATH
+    FILE_PATH=$(dirname "$FILE")
+    local FILE_NAME
+    FILE_NAME=$(basename "$FILE")
+
+    local DESTINATION_NAME
+    if [[ -z $EXTENSION ]]; then
+        DESTINATION_NAME=$NEW_FILE_NAME
+    else
+        DESTINATION_NAME=${NEW_FILE_NAME}.${EXTENSION}
+    fi
+
+    if _display_question_box "Change\n<span foreground='red'>${FILE_NAME}</span>\nto\n<span foreground='green'>${DESTINATION_NAME}</span>?"; then
+        if mv "${FILE_PATH}/${FILE_NAME}" "${FILE_PATH}/${DESTINATION_NAME}"; then
+            _display_info_box "Success\n${FILE_PATH}/${FILE_NAME}\n-->\n${FILE_PATH}/${DESTINATION_NAME}"
+        else
+            _display_error_box "Error: move failed"
+        fi
+    else
+        _display_info_box "Cancelled"
+    fi
+}
+
+rename_tv_show_file() {
+    local FILE="$1"
+
+    [ -z "$FILE" ] && _display_error_box "Error: No file provided" && return 1
+    [ ! -f "$FILE" ] && _display_error_box "Error: File '$FILE' does not exist" && return 1
+
+    local FILE_NAME
+    local FILE_PATH
+    FILE_NAME=$(basename "$FILE")
+    FILE_PATH=$(dirname "$FILE")
+    if [[ $FILE =~ (.*)([Ss][0-9][0-9][Ee][0-9][0-9])\.(.{3,4})$ ]]; then
+        # zenity --width 600 --info --text "<span foreground=\"green\">$FILE_NAME</span>\n\nAlready seems correct."
+        _display_info_box "$FILE_NAME \nAlready seems correct."
+        return 0
+    fi
+
+    local EXTENSION
+    EXTENSION=$(get_file_extension "$FILE")
+
+    TV_SHOW_NAME=$(basename "$FILE" | sed -E 's/\.1080p*|\.720|\.2160//g' | sed -E 's/(.*)([Ss][0-9][0-9][Ee][0-9][0-9])(.*)\.(.*)/\1/g' | sed 's/\./ /g')
+    TV_SHOW_NAME="$(title_case "$TV_SHOW_NAME")"
+
+    EPISODE=$(basename "$FILE" | sed -E 's/\.1080p*|\.720|\.2160//g' | sed -E 's/(.*)[Ss]([0-9][0-9])[Ee]([0-9][0-9])(.*)\.(.*)/S\2E\3/g')
+
+    NEW_FILE_NAME="${TV_SHOW_NAME} ${EPISODE}"
+
+    rename_file "$FILE" "$NEW_FILE_NAME" "$EXTENSION"
+
+}
+
+rename_film_file() {
+    local FILE="$1"
+
+    [ -z "$FILE" ] && _display_error_box "Error: No file provided" && return 1
+    [ ! -e "$FILE" ] && _display_error_box "Error: File '$FILE' does not exist" && return 1
+
+    local FILE_NAME
+    FILE_NAME=$(basename "$FILE")
+    local FILE_PATH
+    FILE_PATH=$(dirname "$FILE")
+
+    local EXTENSION
+    EXTENSION=$(get_file_extension "$FILE")
+
+    NEW_FILE_NAME=$(basename "$FILE" |
+        sed -E 's/\.1080|\.720|\.2160//g' |
+        sed -E 's/(.*?)(\({0,1}[1,2][0,9][0-9]{2}\){0,1})(.*)\.(.*)/\1(\2)/g' |
+        sed 's/\./ /g' |
+        sed -E 's/\(\(/\(/g' |
+        sed -E 's/\)\)/\)/g')
+
+    rename_file "$FILE" "$NEW_FILE_NAME" "$EXTENSION"
+
+}
+
+title_case() {
+    # Split the string into words and loop through them
+    local output=""
+    for word in $1; do
+        # Capitalize the first letter of each word and append it to the output
+        output="${output}${word^} "
+    done
+    # Remove the trailing space using the read command
+    IFS=' ' read -r output <<< "$output"
+    # Echo the output
+    echo "$output"
+}
+
+clean_up_file() {
+    local FILE
+    FILE="$1"
+    case $(guess_file_type "$FILE") in
+        "TV Show")
+            # _display_info_box "FILE: I guess TV Show File"
+            rename_tv_show_file "$FILE"
+            ;;
+        "Film")
+            # _display_info_box "FILE: I guess Film"
+            rename_film_file "$FILE"
+            ;;
+        *)
+            _display_info_box "Could not determine whether file is TV Show or Film"
+            ;;
+    esac
+}
+
+INPUT_FILE_LIST=$(_get_files "par_type=all")
+INPUT_FILE_LIST=$(sed -z "s|'|'\\\''|g" <<< "$INPUT_FILE_LIST")
+for FILE in $INPUT_FILE_LIST; do
+    if [ -f "$FILE" ]; then
+        clean_up_file "$FILE"
+    elif [ -d "$FILE" ]; then
+        case $(guess_file_type "$FILE") in
+            "TV Show")
+                _display_info_box "FOLDER: I guess TV Show Folder"
+                rm "$FILE"/*.nfo
+                rm "$FILE"/*.txt
+                rm -rf "$FILE"/[Ss]creens
+                for FILE_IN_FOLDER in "$FILE"/*; do
+                    clean_up_file "$FILE_IN_FOLDER"
+                done
+                bash -c "\"${ROOT_DIR}/Archive/Extract Here\" \"${FILE}\""
+
+                ;;
+            "Film")
+                _display_info_box "FOLDER: I guess Film"
+                rm "$FILE"/*.nfo
+                rm "$FILE"/*.jpg
+                rm "$FILE"/*.txt
+                rm -rf "$FILE"/[Ss]creens
+                for FILE_IN_FOLDER in "$FILE"/*; do
+                    clean_up_file "$FILE_IN_FOLDER"
+                done
+                rename_film_file "$FILE"
+                ;;
+            *)
+                _display_info_box "Could not determine whether file is TV Show or Film"
+                ;;
+        esac
+    else
+        echo "[$FILE] is not a file"
+    fi
+done

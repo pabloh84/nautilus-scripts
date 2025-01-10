@@ -1,0 +1,107 @@
+#!/usr/bin/env bash
+
+__DEBUG_LOG_FILE="$(basename "${BASH_SOURCE[0]}").log"
+# shellcheck source=scripts/_debug_output
+# source ~/scripts/_debug_output
+
+# Source the script '.common-functions.sh'.
+SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &> /dev/null && pwd)
+ROOT_DIR=$(grep --only-matching "^.*scripts[^/]*" <<< "$SCRIPT_DIR")
+source "$ROOT_DIR/.common-functions.sh"
+
+_main()
+        {
+    local input_files=""
+    local output_dir=""
+
+    # Execute initial checks.
+    # _check_dependencies "command=git"
+    _display_wait_box "2"
+    input_files=$(_get_files "par_type=all; par_get_pwd=true")
+    mapfile -d "$FIELD_SEPARATOR" -t ARRAY <<< "$input_files"
+
+    for target_path in "${ARRAY[@]}"; do
+        echo "File $target_path"
+
+        # Get the parent directory
+        local parent_dir
+        parent_dir=$(dirname "$target_path")
+        if [[ $parent_dir == "." ]]; then
+            parent_dir=$(pwd)
+        fi
+
+        # Construct the .gitignore path
+        local gitignore_path="$parent_dir/.gitignore"
+
+        # Check if the .gitignore file exists
+        if [ ! -f "$gitignore_path" ]; then
+            _display_info_box ".gitignore file does not exist: $gitignore_path"
+            return 0
+        fi
+
+        # Get the relative path
+        local relative_path
+        relative_path=$(realpath --relative-to="$parent_dir" "$target_path")
+
+        # Check if the relative path starts with ../. If it does, it means the target is outside the parent, and we should error out
+        if [[ $relative_path == ../* ]]; then
+            _display_error_box "Target path '$target_path' is not within the parent directory." >&2
+            return 1
+        fi
+
+        # Remove the line from the .gitignore (if it exists) using sed
+        if grep -q "^$relative_path$" "$gitignore_path" 2> /dev/null; then
+            sed -i "/^$relative_path$/d" "$gitignore_path"
+            _display_info_box "Removed '$relative_path' from .gitignore."
+        else
+            _display_info_box "'$relative_path' was not found in .gitignore."
+        fi
+
+        # Remove the .gitignore if it's empty
+        if [ -s "$gitignore_path" ]; then
+            : # Do nothing if the file is not empty
+        else
+            rm "$gitignore_path"
+            _display_info_box "Removed empty .gitignore file"
+        fi
+
+    done
+
+    # Execute the function '_main_task' for each file in parallel.
+    # _run_task_parallel "$input_files" "$output_dir"
+
+    # local std_output=""
+    # std_output=$(_storage_text_read_all)
+
+    # _display_text_box "$std_output"
+}
+
+_main_task()
+             {
+    local input_file=$1
+    local output_dir=$2
+    local std_output=""
+
+     input_get_filename_dir "$input_file"
+
+    # Check if the current directory is a Git repository.
+    # local top_level=""
+    # top_level=$(git -C "$input_file" rev-parse --show-toplevel 2>&1)
+    # _check_output "$?" "$top_level" "$input_file" "" || return 1
+
+    # _directory_push "$top_level" || return 1
+
+    # # Run the main process.
+    # std_output=$(git log 2>&1)
+    # _check_output "$?" "$std_output" "$input_file" "" || return 1
+
+    # _directory_pop || return 1
+
+    # # FORMAT THE OUTPUT:
+    # # Prepend the Git repository.
+    # std_output="--> Git repository: \"$top_level\""$'\n'"$std_output"
+
+    # _storage_text_write_ln "$std_output"$'\n'
+}
+
+_main "$@"
