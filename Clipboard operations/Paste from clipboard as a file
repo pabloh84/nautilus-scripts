@@ -78,6 +78,13 @@ _save_file_from_clipboard() {
 
             xclip -selection clipboard -t "text/html" -o \
                 >"$output_file" 2>/dev/null
+
+            output_file=$(_get_output_filename "Clipboard.txt" \
+                "$output_dir" "par_extension_opt=preserve")
+
+            xclip -selection clipboard -o \
+                >"$output_file" 2>/dev/null
+
             ;;
         *"text/plain"*)
             output_file=$(_get_output_filename "Clipboard.txt" \
