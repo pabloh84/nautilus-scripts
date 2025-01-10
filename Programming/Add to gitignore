@@ -1,0 +1,75 @@
+#!/usr/bin/env bash
+
+__DEBUG_LOG_FILE="$(basename "${BASH_SOURCE[0]}").log"
+# shellcheck source=scripts/_debug_output
+# source ~/scripts/_debug_output
+
+# Source the script '.common-functions.sh'.
+SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &> /dev/null && pwd)
+ROOT_DIR=$(grep --only-matching "^.*scripts[^/]*" <<< "$SCRIPT_DIR")
+source "$ROOT_DIR/.common-functions.sh"
+
+_main()
+        {
+    local input_files=""
+    local output_dir=""
+
+    # Execute initial checks.
+    # _check_dependencies "command=git"
+    _display_wait_box "2"
+    input_files=$(_get_files "par_type=all; par_get_pwd=true")
+    mapfile -d "$FIELD_SEPARATOR" -t ARRAY <<< "$input_files"
+
+    for target_path in "${ARRAY[@]}"; do
+        echo "File $target_path"
+
+        # Get the parent directory
+        local parent_dir
+        parent_dir=$(dirname "$target_path")
+        if [[ $parent_dir == "." ]]; then
+            parent_dir=$(pwd)
+        fi
+
+        # Construct the .gitignore path
+        local gitignore_path="$parent_dir/.gitignore"
+
+        # Get the relative path from the parent directory
+        local relative_path
+        relative_path=$(realpath --relative-to="$parent_dir" "$target_path")
+
+        # Check if the relative path starts with ../. If it does, it means the target is outside the parent, and we should error out
+        if [[ $relative_path == ../* ]]; then
+            _display_error_box "Target path '$target_path' is not within the parent directory." >&2
+            continue
+        fi
+
+        # Check if the relative path is already in the .gitignore
+        if grep -q "^$relative_path$" "$gitignore_path" 2> /dev/null; then
+            _display_info_box "'$relative_path' is already in .gitignore."
+            continue
+        fi
+
+        # Create the .gitignore if it doesn't exist
+        if [ ! -f "$gitignore_path" ]; then
+            touch "$gitignore_path"
+            _display_error_box "Created .gitignore file: $gitignore_path"
+        fi
+
+        # Add the relative path to the .gitignore
+        echo "$relative_path" >> "$gitignore_path"
+        _display_info_box "Added '$relative_path' to .gitignore."
+    done
+
+    _display_result_box "$output_dir"
+}
+
+_main_task()
+             {
+    local input_file=$1
+    local output_dir=$2
+    local std_output=""
+
+     input_get_filename_dir "$input_file"
+}
+
+_main "$@"

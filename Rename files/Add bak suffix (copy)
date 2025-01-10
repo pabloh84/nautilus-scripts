@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+
+# Source the script '.common-functions.sh'.
+SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
+ROOT_DIR=$(grep --only-matching "^.*scripts[^/]*" <<<"$SCRIPT_DIR")
+source "$ROOT_DIR/.common-functions.sh"
+source "$HOME/scripts/functions_file_helpers"
+
+__DEBUG_LOG_FILE="$(basename "${BASH_SOURCE[0]}").log"
+#shellcheck source=/home/pablo/scripts/_debug_output
+# source ~/scripts/_debug_output
+
+
+_main() {
+    local input_files=""
+    local output_dir=""
+
+    # Execute initial checks.
+    _display_wait_box "2"
+    input_files=$(_get_files "par_type=all")
+
+    # Execute the function '_main_task' for each file in parallel.
+    export -f bak bakc
+    _run_task_parallel "$input_files" "$output_dir"
+    _display_result_box ""
+}
+
+_main_task() {
+    local input_file=$1
+    local output_dir=$2
+    local dir=""
+    local filename=""
+
+    echo "echo $input_file"
+    echo "echo $output_dir"
+
+    dir=$(dirname -- "$input_file")
+    filename=$(basename -- "$input_file")
+
+    # Run the main process.
+    # _move_file "skip" "$input_file" "$dir/$filename".bak || return 1
+    bakc "$input_file"
+}
+
+_main "$@"

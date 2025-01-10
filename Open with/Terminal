@@ -23,6 +23,7 @@ _open_app() {
     local available_app=""
     # shellcheck disable=SC2034
     local apps=(
+        "terminator"
         "ptyxis"
         "gnome-terminal"
         "kgx"
@@ -32,7 +33,6 @@ _open_app() {
         "xterm"
         "kitty"
         "alacritty"
-        "terminator"
         "qterminal"
         "deepin-terminal"
         "terminology"

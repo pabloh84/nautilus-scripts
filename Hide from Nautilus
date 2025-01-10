@@ -1,0 +1,17 @@
+#!/bin/bash
+
+__DEBUG_LOG_FILE="$(basename "${BASH_SOURCE[0]}").log"
+# shellcheck source=scripts/_debug_output
+# source ~/scripts/_debug_output
+
+# Source the script '.common-functions.sh'.
+SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &> /dev/null && pwd)
+ROOT_DIR=$(grep --only-matching "^.*scripts[^/]*" <<< "$SCRIPT_DIR")
+source "$ROOT_DIR/.common-functions.sh"
+
+IFS=$'\n' read -d '' -r -a FILE_LIST < <(printf '%s\n' "$NAUTILUS_SCRIPT_SELECTED_FILE_PATHS")
+unset IFS
+
+for FILE in  "${FILE_LIST[@]}"; do
+    basename "$FILE" >> "$(dirname "$FILE")"/.hidden
+done
