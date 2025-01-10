@@ -1,0 +1,41 @@
+#!/bin/bash
+
+__DEBUG_LOG_FILE="$(basename "${BASH_SOURCE[0]}").log"
+# shellcheck source=scripts/_debug_output
+# source ~/scripts/_debug_output
+
+# Source the script '.common-functions.sh'.
+SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &> /dev/null && pwd)
+ROOT_DIR=$(grep --only-matching "^.*scripts[^/]*" <<< "$SCRIPT_DIR")
+source "$ROOT_DIR/.common-functions.sh"
+
+IFS=$'\n' read -d '' -r -a FILE_LIST < <(printf '%s\n' "$NAUTILUS_SCRIPT_SELECTED_FILE_PATHS")
+unset IFS
+
+echo "Number of selected files ${#FILE_LIST[@]}"
+
+function validate_arguments()  {
+    true
+    return
+}
+
+if validate_arguments "${FILE_LIST[@]}"; then
+
+    for FILE in  "${FILE_LIST[@]}"; do
+        echo "Treating [$FILE]"
+
+        basename "$FILE"
+        realpath "$FILE"
+        dirname "$(realpath "$FILE")"
+
+        FILE_DATE=$(date -d @"$(stat -c %Y "$FILE")" +"%Y %m %d")
+
+        NEW_FILE_NAME="$(dirname "$(realpath "$FILE")")/$FILE_DATE $(basename "$FILE")"
+        echo "$NEW_FILE_NAME"
+
+        mv "$FILE" "$NEW_FILE_NAME"
+
+        _display_info_box "$NEW_FILE_NAME"
+
+    done
+fi
