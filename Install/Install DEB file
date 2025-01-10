@@ -1,0 +1,180 @@
+#!/bin/bash
+
+__DEBUG_LOG_FILE="$(basename "${BASH_SOURCE[0]}").log"
+# shellcheck source=scripts/_debug_output
+# source ~/scripts/_debug_output
+
+# Source the script '.common-functions.sh'.
+SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
+ROOT_DIR=$(grep --only-matching "^.*scripts[^/]*" <<<"$SCRIPT_DIR")
+source "$ROOT_DIR/.common-functions.sh"
+
+IFS=$'\n' read -d '' -r -a filelist < <(printf '%s\n' "$NAUTILUS_SCRIPT_SELECTED_FILE_PATHS")
+unset IFS
+
+echo "Number of selected files ${#filelist[@]}"
+
+function validate_arguments()
+{
+    local pathArray=("$@")
+    local FILES_FOUND=FALSE
+    local DIRS_FOUND=FALSE
+
+    for file in "${pathArray[@]}"; do
+        echo "Treating [$file]"
+        if [ -f "$file" ]; then
+            echo "[$file] is a file"
+            FILES_FOUND=TRUE
+        elif [ -d "$file" ]; then
+            echo "[$file] is a directory"
+            DIRS_FOUND=TRUE
+        fi
+    done
+
+    if [[ $DIRS_FOUND == "FALSE" ]] && [[ $FILES_FOUND == "FALSE" ]]; then
+        _display_error_box "ERROR: No files found!!"
+        false
+        return
+    elif [[ $DIRS_FOUND == "TRUE" ]] && [[ $FILES_FOUND == "TRUE" ]]; then
+        _display_error_box "ERROR: Please select only DEB files"
+        false
+        return
+    elif [[ $DIRS_FOUND == "TRUE" ]]; then
+        _display_error_box "ERROR: Cannot install folders"
+        false
+        return
+    else
+        _display_info_box "Installing DEB files"
+        true
+        return
+    fi
+}
+
+function get_archive_extension()
+{
+    archive_extensions=(".deb")
+
+    for ext in "${archive_extensions[@]}"; do
+        if [[ $1 == *"$ext" ]]; then
+            echo "[$1] It's a [$ext] file"
+            __ARCHIVE_FILE_EXTENSION=$ext
+            true
+            return
+        fi
+    done
+    false
+    return
+}
+
+if validate_arguments "${filelist[@]}"; then
+
+    __ARCHIVE_FILE_EXTENSION=
+
+    # Detect available terminal emulator
+    available_terminal=""
+    # shellcheck disable=SC2034  # Used via nameref in _get_available_app
+    terminals=(
+        "terminator"
+        "ptyxis"
+        "gnome-terminal"
+        "kgx"
+        "konsole"
+        "xfce4-terminal"
+        "mate-terminal"
+        "xterm"
+        "kitty"
+        "alacritty"
+    )
+    available_terminal=$(_get_available_app "terminals")
+
+    if [[ -z "$available_terminal" ]]; then
+        _display_error_box "No terminal emulator found. Please install gnome-terminal, terminator, or ptyxis."
+        exit 1
+    fi
+
+    for file in "${filelist[@]}"; do
+        echo "Treating [$file]"
+        if [ -f "$file" ]; then
+            echo "[$file] is a file"
+            if get_archive_extension "$(basename "$file")"; then
+                echo "Extension found: [$__ARCHIVE_FILE_EXTENSION]"
+                __EXTRACT_FOLDER_NAME=$(basename "$file" "$__ARCHIVE_FILE_EXTENSION")
+                echo "Folder name: [$__EXTRACT_FOLDER_NAME]"
+                __EXTRACT_FOLDER_PATH=$(dirname "$(realpath "$file")")/"$__EXTRACT_FOLDER_NAME"
+                echo "Folder path: [$__EXTRACT_FOLDER_PATH]"
+
+                # Create a temporary script to run in the terminal
+                temp_script=$(mktemp)
+
+                cat >"$temp_script" <<'SCRIPT_EOF'
+#!/bin/bash
+set -u
+
+DEB_FILE="$1"
+
+# Prompt user for delete-after-install
+read -p "Do you want to delete \"$DEB_FILE\" after installation? [Y/N]: " ANSWER
+
+# Install the DEB package
+sudo apt install "$DEB_FILE"
+
+# Check if installation succeeded
+if [[ $? != 0 ]]; then
+    echo '++++++++++++++++++++++++++++'
+    echo 'Error installing'
+else
+    echo '++++++++++++++++++++++++++++'
+    echo 'DONE'
+    
+    # Delete file if requested
+    if [[ "$ANSWER" == 'Y' || "$ANSWER" == 'y' ]]; then
+        rm "$DEB_FILE"
+        echo 'DONE - File deleted'
+    fi
+fi
+
+echo ''
+echo 'Press any key to close...'
+read -n 1
+SCRIPT_EOF
+
+                chmod +x "$temp_script"
+
+                # Launch terminal with the script based on detected terminal type
+                case "$available_terminal" in
+                gnome-terminal | kgx | mate-terminal)
+                    "$available_terminal" --window --geometry=800x600 -- "$temp_script" "$file"
+                    ;;
+                ptyxis)
+                    "$available_terminal" --new-window -- "$temp_script" "$file"
+                    ;;
+                konsole)
+                    "$available_terminal" --separate -e "$temp_script" "$file"
+                    ;;
+                xfce4-terminal)
+                    "$available_terminal" --geometry=800x600 -e "$temp_script $file"
+                    ;;
+                terminator)
+                    "$available_terminal" --geometry=800x600 -e "$temp_script $file"
+                    ;;
+                *)
+                    # Generic fallback for other terminals
+                    "$available_terminal" -e "$temp_script $file"
+                    ;;
+                esac
+
+                # Clean up the temporary script after a delay (terminal needs time to read it)
+                (sleep 2 && rm -f "$temp_script") &
+
+                _display_info_box "[$(basename "$file")] installation started"
+
+            else
+                _display_error_box "[$(basename "$file")] not a DEB file"
+            fi
+
+        elif [ -d "$file" ]; then
+            #Do nothing
+            :
+        fi
+    done
+fi
