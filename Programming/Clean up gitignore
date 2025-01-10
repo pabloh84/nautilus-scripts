@@ -1,0 +1,128 @@
+#!/usr/bin/env bash
+
+__DEBUG_LOG_FILE="$(basename "${BASH_SOURCE[0]}").log"
+# shellcheck source=scripts/_debug_output
+# source ~/scripts/_debug_output
+
+# Source the script '.common-functions.sh'.
+SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &> /dev/null && pwd)
+ROOT_DIR=$(grep --only-matching "^.*scripts[^/]*" <<< "$SCRIPT_DIR")
+source "$ROOT_DIR/.common-functions.sh"
+
+_main()
+        {
+    local input_files=""
+    local output_dir=""
+
+    # Execute initial checks.
+    # _check_dependencies "command=git"
+    # _display_wait_box "2"
+    input_files=$(_get_files "par_type=directory; par_max_items=1; par_get_pwd=true")
+    mapfile -d "$FIELD_SEPARATOR" -t ARRAY <<< "$input_files"
+    for target_path in "${ARRAY[@]}"; do
+        local target_dir="${target_path%$'\n'}"
+        echo "[$target_dir]"
+
+        # Construct the .gitignore path
+        local gitignore_path="$target_dir/.gitignore"
+        echo "[$gitignore_path]"
+        git checkout -- "$gitignore_path"
+
+        # Check if the .gitignore file exists
+        if [ ! -f "$gitignore_path" ]; then
+            _display_info_box ".gitignore [$gitignore_path] file does not exist in '$target_dir'."
+            return 0
+        fi
+
+        # Read all lines from the .gitignore file into an array
+        mapfile -t gitignore_entries < "$gitignore_path"
+
+        # If the file is empty, exit
+        if [[ ${#gitignore_entries[@]} -eq 0 ]]; then
+            _display_info_box ".gitignore file in '$target_dir' is empty."
+            return 0
+        fi
+
+        local entries_to_remove=()
+        local relative_path
+
+        # Check for each entry if the file/dir exists
+        for i in "${!gitignore_entries[@]}"; do
+            relative_path="${gitignore_entries[$i]}"
+
+            # Skip comments and empty lines
+            if [[ $relative_path == \#* ]] || [[ -z $relative_path ]]; then
+                continue
+            fi
+
+            # Handle trailing slashes for directories
+            local target_path
+            if [[ ${relative_path: -1} == "/" ]]; then
+                target_path="$target_dir/$relative_path"
+            else
+                target_path="$target_dir/$relative_path"
+            fi
+
+            # Check if the path exists OR if it's a pattern that matches existing files/directories
+            local matching_files
+            matching_files=$(find "$target_dir" -maxdepth 2 -name "${relative_path%/}")
+
+            # if [ ! -e "$target_path" ] && [ -z "$matching_files" ]; then
+            if [ -z "$matching_files" ]; then
+                entries_to_remove+=("$i") #Store the index to remove
+            fi
+        done
+
+        # If no entries to remove are found, exit
+        if [[ ${#entries_to_remove[@]} -eq 0 ]]; then
+            _display_info_box "No non-existent entries found in .gitignore."
+            return 0
+        fi
+
+        # Present the user with the list of entries to remove
+        MESSAGE="The following non-existent entries were found in '$gitignore_path':\n\n"
+        for i in "${entries_to_remove[@]}"; do
+            MESSAGE+="$(printf "%02d %s" "$((i + 1))" "${gitignore_entries[$i]}")\n"
+        done
+
+        # Confirm with the user
+        MESSAGE+="\nDo want to remove these entries?"
+
+        if ! _display_question_box "$MESSAGE"; then
+            _exit_script
+        else
+             # Remove the selected entries (in reverse order to avoid index issues after deletion)
+             echo "Entries:" "${entries_to_remove[@]}"
+            IFS=$'\n' sorted_entries_to_remove=($(sort -nr <<<"${entries_to_remove[*]}"))
+            unset IFS
+            MESSAGE="The following entries have been remode from .gitignore:"$'\n'$'\n'
+            for entry_index in "${sorted_entries_to_remove[@]}"; do
+                sed -i "$((entry_index + 1))d" "$gitignore_path" # Delete the line by index
+                MESSAGE+=$'\t'"· ${gitignore_entries[$entry_index]}"$'\n'
+                unset 'gitignore_entries[entry_index]' # Remove the entry from the array to keep the index correct
+            done
+
+            _storage_text_write_ln "$MESSAGE"
+
+            local std_output=""
+            std_output=$(_storage_text_read_all)
+
+            _display_text_box "$std_output"
+
+            # Remove the .gitignore if it's empty
+            if [ -s "$gitignore_path" ]; then
+                : # Do nothing if the file is not empty
+            else
+                rm "$gitignore_path"
+                _display_info_box "Removed empty .gitignore file"
+            fi
+
+
+            echo "Finished."
+            return 0
+        fi
+
+    done
+}
+
+_main "$@"

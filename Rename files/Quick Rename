@@ -1,0 +1,54 @@
+#!/bin/bash
+
+__DEBUG_LOG_FILE="$(basename "${BASH_SOURCE[0]}").log"
+# shellcheck source=scripts/_debug_output
+# source ~/scripts/_debug_output
+
+# Source the script '.common-functions.sh'.
+SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &> /dev/null && pwd)
+ROOT_DIR=$(grep --only-matching "^.*scripts[^/]*" <<< "$SCRIPT_DIR")
+source "$ROOT_DIR/.common-functions.sh"
+
+# Initial checks
+# INPUT_FILES=$(_get_files "$*" "a" "0" "1" "") || exit 1
+INPUT_FILES=$(_get_files "par_type=all; par_get_pwd=true")
+
+OUTPUT_DIR=$PWD
+
+# STD_OUTPUT=$(/usr/bin/qmv --format=do -e "subl -w")
+
+# _display_info_box "$STD_OUTPUT" "Quick Rename"
+
+if [[ -d $INPUT_FILES    ]]; then
+    cd "$INPUT_FILES" || {
+        _msg_error "Open in Terminal: Can't access folder"
+        exit
+    }
+    STD_OUTPUT=$(/usr/bin/qmv --format=do -e "subl -w")
+elif [[ -f $INPUT_FILES   ]]; then
+    cd "$(dirname "$INPUT_FILES")" || {
+        _msg_error "Open in Terminal: Can't access folder"
+        exit
+    }
+    STD_OUTPUT=$(/usr/bin/qmv --format=do -e "subl -w")
+else
+    STD_OUTPUT=$(/usr/bin/qmv --format=do -e "subl -w")
+fi
+
+_display_info_box "$STD_OUTPUT" "Quick Rename"
+
+# _main_task() {
+#     local FILE=$1
+#     local OUTPUT_DIR=$2
+#     local OUTPUT_FILE
+#     local STD_OUTPUT
+#     local EXIT_CODE
+
+#     OUTPUT_FILE="${FILE^^}"
+#     STD_OUTPUT=$(_transfer_file "m" "$FILE" "$OUTPUT_FILE" 2>&1)
+#     EXIT_CODE=$?
+#     _log_error_result "$FILE" "$STD_OUTPUT" "$OUTPUT_DIR" "$EXIT_CODE" ""
+# }
+
+# _run_parallel_tasks "$INPUT_FILES"
+# _display_result_tasks "$OUTPUT_DIR"
