@@ -22,6 +22,7 @@ _open_app() {
     local input_files=$1
     local available_app=""
     local apps=(
+        "terminator"
         "ptyxis"
         "gnome-terminal"
         "kgx"
@@ -31,7 +32,6 @@ _open_app() {
         "xterm"
         "kitty"
         "alacritty"
-        "terminator"
         "qterminal"
         "deepin-terminal"
         "terminology"
