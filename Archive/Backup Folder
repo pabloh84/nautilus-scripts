@@ -1,0 +1,67 @@
+#!/bin/bash
+
+__DEBUG_LOG_FILE="$(basename "${BASH_SOURCE[0]}").log"
+# shellcheck source=scripts/_debug_output
+# source ~/scripts/_debug_output
+
+# Source the script '.common-functions.sh'.
+SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &> /dev/null && pwd)
+ROOT_DIR=$(grep --only-matching "^.*scripts[^/]*" <<< "$SCRIPT_DIR")
+source "$ROOT_DIR/.common-functions.sh"
+
+source "$HOME/scripts/functions_file_helpers"
+
+IFS=$'\n' read -d '' -r -a SELECTED_PATHS_LIST < <(printf '%s\n' "$NAUTILUS_SCRIPT_SELECTED_FILE_PATHS")
+unset IFS
+
+echo "Number of selected files ${#SELECTED_PATHS_LIST[@]}"
+
+function validate_arguments() {
+    local PATH_LIST=("$@")
+    local FILES_FOUND=FALSE
+    local DIRS_FOUND=FALSE
+
+    for CURRENT_PATH in  "${PATH_LIST[@]}"; do
+        echo "Treating [$CURRENT_PATH]"
+        if [ -f "$CURRENT_PATH" ]; then
+            echo "[$CURRENT_PATH] is a file"
+            FILES_FOUND=TRUE
+        elif [ -d "$CURRENT_PATH" ]; then
+            echo "[$CURRENT_PATH] is a directory"
+            DIRS_FOUND=TRUE
+        fi
+    done
+
+    if [[ $DIRS_FOUND == "FALSE" ]] && [[ $FILES_FOUND == "FALSE" ]]; then
+        _display_error_box "No files selected"
+        false
+               return
+    elif [[ $DIRS_FOUND == "TRUE" ]] && [[ $FILES_FOUND == "TRUE" ]]; then
+        _display_error_box "Please select only folders"
+        false
+               return
+    elif [[ $DIRS_FOUND == "TRUE" ]]; then
+        _display_info_box "Backing up folders"
+        true
+              return
+    else
+        _display_error_box "Please select only folders"
+        false
+               return
+    fi
+}
+
+if validate_arguments "${SELECTED_PATHS_LIST[@]}"; then
+
+    BACKUP_FOLDER=$(_display_dir_selection_box)
+
+    for SELECTED_PATH in  "${SELECTED_PATHS_LIST[@]}"; do
+        echo "Treating [$SELECTED_PATH]"
+        if [ -d "$SELECTED_PATH" ]; then
+            echo "[$SELECTED_PATH] is a directory"
+            backup_folder "$SELECTED_PATH"
+            _display_info_box "Backup DONE $TAR_FILE_PATH"
+            open "$BACKUP_FOLDER"
+        fi
+    done
+fi

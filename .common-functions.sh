@@ -2388,7 +2388,7 @@ _display_gdbus_notify() {
     # Use 'gdbus' to send the notification.
     gdbus call --session --dest "$interface" --object-path "$object_path" \
         --method "$interface.$method" "$app_name" 0 "$icon" "$title" "$body" \
-        "[]" "{\"urgency\": <$urgency>}" 5000 &>/dev/null
+        "[]" "{\"urgency\": <$urgency>, \"transient\": <true>}" 5000 &>/dev/null
 }
 
 # -----------------------------------------------------------------------------
