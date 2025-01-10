@@ -10,14 +10,8 @@ ROOT_DIR=$(grep --only-matching "^.*scripts[^/]*" <<< "$SCRIPT_DIR")
 source "$ROOT_DIR/common-functions.sh"
 
 # Initial checks
-_main()
-{
-local input_files=$(_get_files "par_type=file; par_select_extension='m3u'")
-local output_dir=""
-_run_task_parallel "$input_files" "$output_dir"
-_display_result_box "$output_dir"
-
-}
+INPUT_FILES=$(_get_files "$*" "a" "1" "" "") || exit 1
+OUTPUT_DIR=$PWD
 
 _main_task() {
     local FILE=$1
@@ -33,7 +27,8 @@ _main_task() {
     # OUTPUT_FILE=$(echo "$FILE" | sed "s|[\*]|-|g;s|\:| -|g")
     # STD_OUTPUT=$(_transfer_file "m" "$FILE" "$OUTPUT_FILE" 2>&1)
     EXIT_CODE=$?
-    # _log_error "$FILE" "$STD_OUTPUT" "$OUTPUT_DIR" "$EXIT_CODE" ""
+    _log_error_result "$FILE" "$STD_OUTPUT" "$OUTPUT_DIR" "$EXIT_CODE" ""
 }
 
-_main "$@"
+_run_parallel_tasks "$INPUT_FILES"
+_display_result_tasks "$OUTPUT_DIR"
