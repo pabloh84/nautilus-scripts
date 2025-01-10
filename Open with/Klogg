@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+# install_keyboard_shortcut=F4
+
+__DEBUG_LOG_FILE="$(basename "${BASH_SOURCE[0]}").log"
+# shellcheck source=scripts/_debug_output
+# source ~/scripts/_debug_output
+
+# Source the script '.common-functions.sh'.
+SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &> /dev/null && pwd)
+ROOT_DIR=$(grep --only-matching "^.*scripts[^/]*" <<< "$SCRIPT_DIR")
+source "$ROOT_DIR/.common-functions.sh"
+
+_main() {
+    local input_files=""
+
+    # Execute initial checks.
+    _check_dependencies ""
+    input_files=$(_get_files "par_type=files")
+
+    _open_app "$input_files"
+}
+
+_open_app() {
+    local input_files=$1
+    # Iterate over each input file (directory).
+    local input_file=""
+    for input_file in $input_files; do
+        echo "Opening $input_file"
+        nohup klogg "$input_file" &
+    done
+}
+
+_main "$@"

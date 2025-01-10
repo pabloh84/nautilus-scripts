@@ -1,0 +1,74 @@
+#! /bin/bash
+
+__DEBUG_LOG_FILE="$(basename "${BASH_SOURCE[0]}").log"
+# shellcheck source=scripts/_debug_output
+# source ~/scripts/_debug_output
+
+# Source the script '.common-functions.sh'.
+SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &> /dev/null && pwd)
+ROOT_DIR=$(grep --only-matching "^.*scripts[^/]*" <<< "$SCRIPT_DIR")
+source "$ROOT_DIR/.common-functions.sh"
+
+IFS=$'\n' read -d '' -r -a SELECTION_LIST < <(printf '%s\n' "$NAUTILUS_SCRIPT_SELECTED_FILE_PATHS")
+unset IFS
+
+declare -a DIR_LIST
+declare -a FILE_LIST
+
+for ENTRY in "${SELECTION_LIST[@]}"; do
+
+    echo "Treating [$ENTRY]"
+    if [ -f "$ENTRY" ]; then
+        echo "[$ENTRY] is a file"
+        FILE_LIST+=("$ENTRY")
+    elif [ -d "$ENTRY" ]; then
+        echo "[$ENTRY] is directory"
+        DIR_LIST+=("$ENTRY")
+    fi
+    echo
+    echo
+done
+
+echo "Selected [${#DIR_LIST[@]}] directories:" "${DIR_LIST[@]}"
+echo
+echo
+echo "Selected [${#FILE_LIST[@]}] files:" "${FILE_LIST[@]}"
+
+OPENED=0
+
+if [[ ${#DIR_LIST[@]} -gt 0 ]]; then
+    echo "Opening new sublime"
+    subl -n
+    sleep .2
+    for DIR in "${DIR_LIST[@]}"; do
+        subl -a "$DIR"
+
+        # REGEXP=".*\.log"
+        # find "$DIR" -regex "$REGEXP" | wc -l
+        # if [[ $(find "$DIR" -regex "$REGEXP" | wc -l) > 0 ]]; then
+        #     subl -a "/home/pablo/PandaSecurity/scripts/helper.sh"
+        # fi
+
+        #Open helper for directories under PandaSecurity
+        if [[ $DIR =~ .*"PandaSecurity".*   ]]; then
+            subl -a "/home/pablo/PandaSecurity/scripts/detect_stuck.sh"
+            subl -a "/home/pablo/PandaSecurity/scripts/helper.sh"
+        fi
+        OPENED=1
+
+    done
+fi
+
+if [[ ${#FILE_LIST[@]} -gt 0 ]]; then
+    echo "Opening files"
+    for file in "${FILE_LIST[@]}"; do
+        subl -a "$file"
+        OPENED=1
+    done
+fi
+
+if [[ -d $PWD ]] && [[ ! $OPENED -eq 1 ]]; then
+    echo "Opening current folder"
+    subl -n
+    subl -a "$PWD"
+fi

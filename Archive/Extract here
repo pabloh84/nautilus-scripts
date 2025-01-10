@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 # install_keyboard_shortcut=<Control>E
 
+__DEBUG_LOG_FILE="$(basename "${BASH_SOURCE[0]}").log"
+# shellcheck source=scripts/_debug_output
+# source ~/scripts/_debug_output
+
 # Source the script '.common-functions.sh'.
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
 ROOT_DIR=$(grep --only-matching "^.*scripts[^/]*" <<<"$SCRIPT_DIR")
@@ -12,7 +16,7 @@ _main() {
 
     # Execute initial checks.
     _check_dependencies ""
-    input_files=$(_get_files "par_type=file")
+    input_files=$(_get_files "par_type=all")
 
     # Defalt password for testing encrypted archives.
     TEMP_DATA_TASK="null"
@@ -40,10 +44,91 @@ _main_task() {
     local input_file=$1
     local output_dir=$2
 
-    # Run the main process.
-    local command=""
-    command=$(_get_command "$input_file" "available")
-    _run_command "$input_file" "$command" "$output_dir"
+    echo "treating [$input_file]"
+    if [[ -d $input_file ]]; then
+        echo "[$input_file] is a folder"
+
+        local __DO_MOVE=1
+
+        shopt -s dotglob
+        ## globstar causes ** to match all files and directories recursively. # shopt -s globstar
+        local hiddenFileCounter=0
+        local hiddenDirectoryCounter=0
+        local fileCounter=0
+        local directoryCounter=0
+        local totalEntries=0
+        local totalHiddenEntries=0
+
+        for entry in "$input_file"/*; do
+            if [[ -f $entry && "$( basename "$entry")" == .* ]]; then
+                ((hiddenFileCounter += 1))
+                hiddenFiles+=("$(basename "$entry")")
+            elif [[ -d $entry && "$( basename "$entry")" == .?* ]]; then
+                ((hiddenDirectoryCounter += 1))
+                hiddenDirectories+=("$(basename "$entry")")
+            elif [[ -f $entry ]]; then
+                ((fileCounter += 1))
+            elif [[ -d $entry ]]; then
+                ((directoryCounter += 1))
+            fi
+            ((totalEntries += 1))
+        done
+
+        echo "Total Entries: $totalEntries"
+        echo "Files found: $fileCounter"
+        echo "Directories found: $directoryCounter"
+        echo "Hidden directories found: $hiddenDirectoryCounter" "${hiddenDirectories[@]}"
+        echo "Hidden files found: $hiddenFileCounter" "${hiddenFiles[@]}"
+
+        ((totalHiddenEntries = hiddenDirectoryCounter + hiddenFileCounter))
+        if ((totalHiddenEntries > 0)); then
+
+            # Compose the Zenity text
+            __ZENITY_TEXT="Found $totalHiddenEntries hidden entries in $input_file:\n\n"
+            [[ $hiddenDirectoryCounter -gt 0 ]] && {
+                __ZENITY_TEXT+=" - $hiddenDirectoryCounter folders:\n"
+                for entry in "${hiddenDirectories[@]}"; do
+                    __ZENITY_TEXT+="    -> ./$entry\n"
+                done
+                __ZENITY_TEXT+="\n"
+            }
+            [[ $hiddenFileCounter -gt 0 ]] && {
+                __ZENITY_TEXT+=" - $hiddenFileCounter files\n"
+                for entry in "${hiddenFiles[@]}"; do
+                    __ZENITY_TEXT+="    -> ./$entry\n"
+                done
+                __ZENITY_TEXT+="\n"
+            }
+            __ZENITY_TEXT+="Do you wish to continue?"
+
+            # Display Zenity question dialog
+            echo "$__ZENITY_TEXT"
+            if ! zenity --question --width=350 --timeout=15 --text="$__ZENITY_TEXT"; then
+                __DO_MOVE=0
+            fi
+        fi
+        if [[ $__DO_MOVE == 1 ]]; then
+
+            mv -f "$input_file" "$input_file"_extracting
+            shopt -s dotglob
+            # rsync --remove-source-files -Pa "$input_file"_extracting/* "$(pwd)"/
+            mv "$input_file"_extracting/* "$(dirname "$input_file")"
+            shopt -u dotglob
+            find "$input_file"_extracting -type d -empty -delete
+            notify-send -e -i file-roller "Extract Here" "[$(basename "$input_file")] extracted"
+        else
+            echo "Not moving due to hidden files"
+        fi
+    else
+        # Run the main process.
+        local command=""
+        command=$(_get_command "$input_file" "available")
+        _run_command "$input_file" "$command" "$output_dir"
+        if zenity --question --width=350 --timeout=15 --text="Do you wish to remove '$input_file'"; then
+            trash-put "$input_file"
+        fi
+
+    fi
 }
 
 _get_dependencies() {
