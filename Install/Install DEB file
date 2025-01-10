@@ -1,0 +1,110 @@
+#!/bin/bash
+
+__DEBUG_LOG_FILE="$(basename "${BASH_SOURCE[0]}").log"
+# shellcheck source=scripts/_debug_output
+# source ~/scripts/_debug_output
+
+# Source the script '_common-functions.sh'.
+SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &> /dev/null && pwd)
+ROOT_DIR=$(grep --only-matching "^.*scripts[^/]*" <<< "$SCRIPT_DIR")
+source "$ROOT_DIR/_common-functions.sh"
+
+IFS=$'\n' read -d '' -r -a filelist < <(printf '%s\n' "$NAUTILUS_SCRIPT_SELECTED_FILE_PATHS")
+unset IFS
+
+echo "Number of selected files ${#filelist[@]}"
+
+function validate_arguments() {
+    local pathArray=("$@")
+    local FILES_FOUND=FALSE
+    local DIRS_FOUND=FALSE
+
+    for file in "${pathArray[@]}"; do
+        echo "Treating [$file]"
+        if [ -f "$file" ]; then
+            echo "[$file] is a file"
+            FILES_FOUND=TRUE
+        elif [ -d "$file" ]; then
+            echo "[$file] is a directory"
+            DIRS_FOUND=TRUE
+        fi
+    done
+
+    if [[ $DIRS_FOUND == "FALSE" ]] && [[ $FILES_FOUND == "FALSE" ]]; then
+        _display_error_box "ERROR: No files found!!"
+        false
+        return
+    elif [[ $DIRS_FOUND == "TRUE" ]] && [[ $FILES_FOUND == "TRUE" ]]; then
+        _display_error_box "ERROR: Please select only DEB files"
+        false
+        return
+    elif [[ $DIRS_FOUND == "TRUE" ]]; then
+        _display_error_box "ERROR: Cannot install folders"
+        false
+        return
+    else
+        _display_info_box "Installing DEB files"
+        true
+        return
+    fi
+}
+
+function get_archive_extension() {
+    archive_extensions=(".deb")
+
+    for ext in "${archive_extensions[@]}"; do
+        if [[ $1 == *"$ext" ]]; then
+            echo "[$1] It's a [$ext] file"
+            __ARCHIVE_FILE_EXTENSION=$ext
+            true
+            return
+        fi
+    done
+    false
+    return
+}
+
+if validate_arguments "${filelist[@]}"; then
+
+    __ARCHIVE_FILE_EXTENSION=
+
+    for file in "${filelist[@]}"; do
+        echo "Treating [$file]"
+        if [ -f "$file" ]; then
+            echo "[$file] is a file"
+            if get_archive_extension "$(basename "$file")"; then
+                echo "Extension found: [$__ARCHIVE_FILE_EXTENSION]"
+                __EXTRACT_FOLDER_NAME=$(basename "$file" "$__ARCHIVE_FILE_EXTENSION")
+                echo "Folder name: [$__EXTRACT_FOLDER_NAME]"
+                __EXTRACT_FOLDER_PATH=$(dirname "$(realpath "$file")")/"$__EXTRACT_FOLDER_NAME"
+                echo "Folder path: [$__EXTRACT_FOLDER_PATH]"
+
+                # gnome-terminal --window --geometry=100x30 -- bash -c "sudo apt install "$file" ; echo ++++++++++++++++++++++++++; echo DONE; read -n 1"
+                set +u
+                gnome-terminal --window --geometry=100x30 -- bash -c "read -p 'Do you want to delete \"$file\" after installation? [Y/N]: ' ANSWER;
+                 sudo apt install \"$file\" ;
+                 if [[ $? != 0 ]]; then
+                    echo '++++++++++++++++++++++++++'
+                    echo 'Error installing'
+                 else
+                    echo '++++++++++++++++++++++++++'
+                    echo 'DONE';
+                    if [[ \$ANSWER == 'Y' || \$ANSWER == 'y' ]]; then
+                        rm \"$file\";
+                        echo 'DONE - File deleted';
+                    fi;
+                 fi
+                read -n 1"
+                set -u
+                _display_info_box "[$(basename "$file")] installed"
+
+            else
+                _display_error_box "[$(basename "$file")] not a DEB file"
+            fi
+
+        elif [ -d "$file" ]; then
+            #Do nothing
+            :
+        fi
+    done
+fi
