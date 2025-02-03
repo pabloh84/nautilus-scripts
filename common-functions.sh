@@ -75,11 +75,12 @@ _cleanup_on_exit() {
     # This function performs cleanup tasks when the script exits. It is
     # designed to safely and efficiently remove temporary directories or files
     # that were created during the script's execution.
+
     # Remove local temporary dirs or files.
     local items_to_remove=""
     items_to_remove=$(cat -- "$TEMP_DIR_ITEMS_TO_REMOVE/"* 2>/dev/null)
 
-    # Allows the symbol "'" in filenames (inside 'xargs').
+    # Allows the symbol "'" in filenames (inside 'xargs' with 'bash -c').
     items_to_remove=$(sed -z "s|'|'\\\''|g" <<<"$items_to_remove")
 
     printf "%s" "$items_to_remove" | xargs \
@@ -91,6 +92,7 @@ _cleanup_on_exit() {
 
     # Remove the main temporary dir.
     rm -rf -- "$TEMP_DIR" &>/dev/null
+
     if ! _is_gui_session; then
         printf "End of the script.\n" >&2
     fi
@@ -115,6 +117,7 @@ _check_dependencies() {
     #       command=ffmpeg; pkg_manager=dnf; package=ffmpeg-free |
     #       command=ffmpeg; pkg_manager=pacman; package=ffmpeg |
     #       command=ffmpeg; pkg_manager=zypper; package=ffmpeg"
+
     local dependencies=$1
     local packages_to_install=""
     local pkg_manager_installed=""
@@ -143,6 +146,7 @@ _check_dependencies() {
         local command=""
         local package=""
         local pkg_manager=""
+
         # Evaluate the values parameters from the 'dependency' variable.
         eval "$dependency"
 
@@ -202,6 +206,7 @@ _check_output() {
     #   - $2 (std_output): The standard output or error from the command.
     #   - $3 (input_file): The input file associated (if applicable).
     #   - $4 (output_file): The expected output file to verify its existence.
+
     local exit_code=$1
     local std_output=$2
     local input_file=$3
@@ -229,6 +234,7 @@ _command_exists() {
     #
     # Parameters:
     #   - $1 (command_check): The name of the command to verify.
+
     local command_check=$1
 
     if command -v "$command_check" &>/dev/null; then
@@ -309,6 +315,7 @@ _convert_text_to_delimited_string() {
 _display_dir_selection_box() {
     # This function presents a graphical interface to allow the user to select
     # one or more directories.
+
     local input_files=""
 
     if _command_exists "zenity"; then
@@ -364,6 +371,7 @@ _display_error_box() {
     #
     # Parameters:
     #   - $1 (message): The error message to display.
+
     local message=$1
 
     if ! _is_gui_session; then
@@ -386,6 +394,7 @@ _display_info_box() {
     #
     # Parameters:
     #   - $1 (message): The information message to display.
+
     local message=$1
 
     if ! _is_gui_session; then
@@ -416,6 +425,7 @@ _display_list_box() {
     #   indicating whether symbolic links in item paths should be resolved to
     #   their target locations when opening the item's location. Defaults to
     #   "true".
+
     local message=$1
     local columns=$2
     local item_name=${3:-"items"}
@@ -487,7 +497,8 @@ _display_password_box() {
     #
     # Parameters:
     #   - $1 (message): A message to display as a prompt for the password.
-    local message="$1"
+
+    local message=$1
     local password=""
 
     # Ask the user for the 'password'.
@@ -510,6 +521,7 @@ _display_password_box() {
 _display_password_box_define() {
     # This function prompts the user to enter a password and ensures the
     # password is not empty.
+
     local message="Type your password:"
     local password=""
 
@@ -530,6 +542,7 @@ _display_question_box() {
     #
     # Parameters:
     #   - $1 (message): The question message to display to the user.
+
     local message=$1
     local response=""
 
@@ -556,6 +569,7 @@ _display_text_box() {
     # Parameters:
     #   - $1 (message): The message to display. If empty, a default message
     #     "(Empty result)" is shown.
+
     local message=$1
     _close_wait_box
     _logs_consolidate ""
@@ -588,9 +602,9 @@ _display_result_box() {
     # Parameters:
     #   - $1 (output_dir): The directory where output files are stored or
     #     expected to be.
+
     local output_dir=$1
     _close_wait_box
-
     _logs_consolidate "$output_dir"
 
     # If 'output_dir' parameter is defined.
@@ -621,6 +635,7 @@ _display_wait_box() {
     # Parameters:
     #   - $1 (open_delay): Optional. The delay (in seconds) before the wait box
     #     is shown. Defaults to 2 seconds if not provided.
+
     local open_delay=${1:-"2"}
     local message="Running the task. Please, wait..."
 
@@ -636,6 +651,7 @@ _display_wait_box_message() {
     #     "Running the task. Please, wait...").
     #   - $2 (open_delay): Optional. The delay (in seconds) before the wait box
     #     is shown. Defaults to 2 seconds if not provided.
+
     local message=$1
     local open_delay=${2:-"2"}
 
@@ -705,6 +721,7 @@ _close_wait_box() {
     # This function is responsible for closing any open "wait boxes" (progress
     # indicators) that were displayed during the execution of a task. It checks
     # for both Zenity and KDialog wait boxes and handles their closure.
+
     # Check if 'wait_box' will open.
     if [[ -f "$WAIT_BOX_CONTROL" ]]; then
         rm -f -- "$WAIT_BOX_CONTROL" # Cancel the future open.
@@ -735,7 +752,9 @@ _exit_script() {
     # This function is responsible for safely exiting the script by terminating
     # all child processes associated with the current script and printing an
     # exit message to the terminal.
+
     _close_wait_box
+
     local child_pids=""
     local script_pid=$$
 
@@ -753,6 +772,78 @@ _exit_script() {
     xargs kill <<<"$child_pids" &>/dev/null
 }
 
+_find_filtered_files() {
+    # This function filters a list of files or directories based on various
+    # user-specified criteria, such as file type, extensions, and recursion.
+    #
+    # Parameters:
+    #   - $1 (input_files): A space-separated string containing file or
+    #     directory paths to filter. These paths are passed to the "find"
+    #     command.
+    #   - $2 (par_type): A string specifying the type of file to search for. It
+    #     can be:
+    #     - "file": To search for files and symbolic links.
+    #     - "directory": To search for directories and symbolic links.
+    #   - $3 (par_skip_extension): A string of file extensions to exclude from
+    #     the search. Only files with extensions not matching this list will be
+    #     included.
+    #   - $4 (par_select_extension): A string of file extensions to include in
+    #     the search. Only files with matching extensions will be included.
+    #   - $5 (par_find_parameters): Optional. Additional parameters to be
+    #     passed directly to the "find" command.
+    #
+    # Example:
+    #   - Input: "dir1 dir2", "file", "", "txt|pdf", "true"
+    #   - Output: A list of files with extensions ".txt" or ".pdf" from the
+    #     directories "dir1" and "dir2", searched recursively.
+
+    local input_files=$1
+    local par_type=$2
+    local par_skip_extension=$3
+    local par_select_extension=$4
+    local par_find_parameters=$5
+    local filtered_files=""
+    local find_command=""
+
+    input_files=$(sed "s|'|'\"'\"'|g" <<<"$input_files")
+    input_files=$(sed "s|$FIELD_SEPARATOR|' '|g" <<<"$input_files")
+
+    # Build a 'find' command.
+    find_command="find '$input_files'"
+
+    if [[ -n "$par_find_parameters" ]]; then
+        find_command+=" $par_find_parameters"
+    fi
+
+    # Expand the directories with the 'find' command.
+    case "$par_type" in
+    "file") find_command+=" \( -type l -o -type f \)" ;;
+    "directory") find_command+=" \( -type l -o -type d \)" ;;
+    esac
+
+    if [[ -n "$par_select_extension" ]]; then
+        find_command+=" -regextype posix-extended "
+        find_command+=" -regex \".*\.($par_select_extension)$\""
+    fi
+
+    if [[ -n "$par_skip_extension" ]]; then
+        find_command+=" -regextype posix-extended "
+        find_command+=" ! -regex \".*\.($par_skip_extension)$\""
+    fi
+
+    find_command+=" ! -path \"$IGNORE_FIND_PATH\""
+    # shellcheck disable=SC2089
+    find_command+=" -print0"
+
+    # shellcheck disable=SC2086
+    filtered_files=$(eval $find_command 2>/dev/null |
+        tr "\0" "$FIELD_SEPARATOR")
+    filtered_files=$(_str_remove_empty_tokens "$filtered_files")
+
+    # Return the filtered files.
+    printf "%s" "$filtered_files"
+}
+
 _gdbus_notify() {
     # This function sends a desktop notification using the "gdbus" tool, which
     # interfaces with the D-Bus notification system (specifically the
@@ -762,6 +853,7 @@ _gdbus_notify() {
     #   - $1 (icon): The icon to display with the notification.
     #   - $2 (title): The title of the notification.
     #   - $3 (body): The main message to be displayed in the notification.
+
     local icon=$1
     local title=$2
     local body=$3
@@ -773,7 +865,7 @@ _gdbus_notify() {
     # Use 'gdbus' to send the notification.
     gdbus call --session --dest "$interface" --object-path "$object_path" \
         --method "$interface.$method" "$app_name" 0 "$icon" "$title" "$body" \
-        "[]" '{"urgency": <1>, "transient": <true>}' 5000 &>/dev/null
+        "[]" '{"urgency": <1>}' 5000 &>/dev/null
 }
 
 _get_clipboard_data() {
@@ -792,6 +884,7 @@ _get_filename_dir() {
     #
     # Parameters:
     #   - $1 (input_filename): The full path or relative path to the file.
+
     local input_filename=$1
     local dir=""
 
@@ -805,6 +898,7 @@ _get_filename_extension() {
     #
     # Parameters:
     #   - $1 (filename): The input filename (can be absolute or relative).
+
     local filename=$1
     filename=$(sed -E "s|.*/(\.)*||g" <<<"$filename")
     filename=$(sed -E "s|^(\.)*||g" <<<"$filename")
@@ -819,6 +913,7 @@ _get_filename_full_path() {
     #
     # Parameters:
     #   - $1 (input_filename): The input filename or relative path.
+
     local input_filename=$1
     local full_path=$input_filename
     local dir=""
@@ -840,6 +935,7 @@ _get_filename_next_suffix() {
     #   - $1 (filename): The input filename or path. This can be an absolute or
     #   relative filename. If the input file has an extension, it will be
     #   stripped for the purpose of generating the new filename.
+
     local filename=$1
     local filename_result=$filename
     local filename_base=""
@@ -864,12 +960,12 @@ _get_filename_next_suffix() {
     printf "%s" "$filename_result"
 }
 
-
 _get_filenames_filemanager() {
     # This function retrieves a list of selected filenames or URIs from a file
     # manager (such as Caja, Nemo, or Nautilus) and processes the input
     # accordingly. If no selection is detected, it falls back to using a
     # standard input file list.
+
     local input_files=""
 
     # Try to use the information provided by the file manager.
@@ -920,13 +1016,14 @@ _get_files() {
     #   - "par_select_extension": Filters by file extension.
     #   - "par_select_mime": Filters by MIME type.
     #   - "par_skip_extension": Skips files with specific extensions.
+    #   - "par_skip_encoding": Skips files with specific encodings.
     #   - "par_sort_list": If "true", sorts the list of files.
     #   - "par_validate_conflict": If "true", validates for filenames with the
     #     same base name.
+
     local parameters=$1
     local input_files=""
     input_files=$(_get_filenames_filemanager)
-
 
     # Default values for input parameters.
     local par_get_pwd="false"
@@ -935,6 +1032,7 @@ _get_files() {
     local par_recursive="false"
     local par_select_extension=""
     local par_select_mime=""
+    local par_skip_encoding=""
     local par_skip_extension=""
     local par_sort_list="false"
     local par_type="file"
@@ -968,27 +1066,32 @@ _get_files() {
             <<<"$input_files")
     fi
 
-    # This workaround allows the scripts to handle cases with a large input
-    # list of files. In this case, just select a single directory. Then, the
-    # scripts operate on the files within the selected directory. This
-    # addresses the GNOME error: "Could not start application: Failed to
-    # execute child process "/bin/sh" (Argument list too long)".
     local initial_items_count=0
     initial_items_count=$(_get_items_count "$input_files")
-    if ((initial_items_count == 1)) &&
-        [[ -d "$input_files" ]] && [[ "${input_files,,}" == *"batch" ]]; then
-        input_files=$(find "$input_files" \
-            -mindepth 1 -maxdepth 1 ! -path "$IGNORE_FIND_PATH" \
-            -printf "%p$FIELD_SEPARATOR")
+
+    local find_parameters=""
+    if ((initial_items_count == 1)) && [[ -d "$input_files" ]] &&
+        [[ "$par_recursive" == "false" ]] &&
+        printf "%s" "$(basename -- "$input_files")" |
+        grep --quiet --ignore-case --word-regexp "batch"; then
+        # This workaround allows the scripts to handle cases with a large input
+        # list of files. In this case, just select a single directory  with a
+        # name that includes the word 'batch'. Then, the scripts operate on the
+        # files within the selected directory. This addresses the GNOME error:
+        # "Could not start application: Failed to execute child process
+        # "/bin/sh" (Argument list too long)".
+        find_parameters="-mindepth 1 -maxdepth 1"
+    elif [[ "$par_recursive" == "false" ]]; then
+        find_parameters="-maxdepth 0"
     fi
 
-    # Pre-select the input files. Also, expand it (if 'par_recursive' is true).
-    input_files=$(_validate_file_preselect \
+    # Pre-select the input files.
+    input_files=$(_find_filtered_files \
         "$input_files" \
         "$par_type" \
         "$par_skip_extension" \
         "$par_select_extension" \
-        "$par_recursive")
+        "$find_parameters")
 
     # Return the current working directory if no directories have been
     # selected.
@@ -1000,9 +1103,12 @@ _get_files() {
     fi
 
     # Validates the mime or encoding of the file.
-    input_files=$(_validate_file_mime_parallel \
-        "$input_files" \
-        "$par_select_mime")
+    if [[ -n "$par_select_mime" ]] || [[ -n "$par_skip_encoding" ]]; then
+        input_files=$(_validate_file_mime_parallel \
+            "$input_files" \
+            "$par_select_mime" \
+            "$par_skip_encoding")
+    fi
 
     # Validates the number of valid files.
     _validate_files_count \
@@ -1035,6 +1141,7 @@ _get_file_encoding() {
     # Parameters:
     #   - $1 (filename): The path to the file whose encoding is to be
     #     determined.
+
     local filename=$1
     local std_output=""
 
@@ -1053,6 +1160,7 @@ _get_file_mime() {
     #
     # Parameters:
     #   - $1 (filename): The path to the file whose MIME is to be determined.
+
     local filename=$1
     local std_output=""
 
@@ -1090,6 +1198,7 @@ _get_items_count() {
 _get_max_procs() {
     # This function returns the maximum number of processing units (CPU cores)
     # available on the system.
+
     nproc --all 2>/dev/null
 }
 
@@ -1107,6 +1216,7 @@ _get_output_dir() {
     #   directory (e.g., current working directory or an alternative with write
     #   permissions) as the output directory. If "false" or not set, a new
     #   subdirectory is created for the output.
+
     local parameters=$1
     local output_dir=""
 
@@ -1166,6 +1276,7 @@ _get_output_filename() {
     #     - par_prefix: A string to be added as prefix to the output filename.
     #     - par_suffix: A string to be added as suffix to the output
     #       filename, placed before the extension.
+
     local input_file=$1
     local output_dir=$2
     local parameters=$3
@@ -1189,8 +1300,15 @@ _get_output_filename() {
 
     if [[ -d "$input_file" ]]; then
         # Handle case where input_file is a directory.
-        output_file+=$filename
-        output_file+=".$par_extension"
+        case "$par_extension_opt" in
+        "append" | "replace")
+            output_file+=$filename
+            output_file+=".$par_extension"
+            ;;
+        "preserve" | "strip")
+            output_file+=$filename
+            ;;
+        esac
     else
         # Handle case where input_file is a regular file.
         case "$par_extension_opt" in
@@ -1239,11 +1357,13 @@ _get_qdbus_command() {
     compgen -c | grep --perl-regexp -m1 "^qdbus" || return 1
     return 0
 }
+
 _get_script_name() {
     # This function returns the name of the currently executing script. It uses
     # the "basename" command to extract the script's filename from the full
     # path provided by "$0".
-    basename -- "$(realpath "$0")"
+
+    basename -- "$0"
 }
 
 _get_temp_dir_local() {
@@ -1259,6 +1379,7 @@ _get_temp_dir_local() {
     #
     # Output:
     #   - The full path to the newly created temporary directory.
+
     local output_dir=$1
     local basename=$2
     local temp_dir=""
@@ -1280,6 +1401,7 @@ _get_temp_file() {
     #
     # Output:
     #   - The full path to the newly created temporary file.
+
     local temp_file=""
     temp_file=$(mktemp --tmpdir="$TEMP_DIR_TASK")
 
@@ -1294,6 +1416,7 @@ _get_temp_file_dry() {
     #
     # Output:
     #   - The path of the temporary file, without actually creating the file.
+
     local temp_file=""
     temp_file=$(mktemp --dry-run --tmpdir="$TEMP_DIR_TASK")
 
@@ -1311,6 +1434,7 @@ _get_working_directory() {
     #
     # Output:
     #   - The determined working directory.
+
     local working_directory=""
 
     # Try to use the information provided by the file manager.
@@ -1368,11 +1492,13 @@ _is_directory_empty() {
     fi
     return 1
 }
+
 _is_gui_session() {
     # This function checks whether the script is running in a graphical user
     # interface (GUI) session. It does so by checking if the DISPLAY
     # environment variable is set, which is typically present in GUI sessions
     # (e.g., X11 or Wayland).
+
     if env | grep --quiet "^DISPLAY"; then
         return 0
     fi
@@ -1392,6 +1518,7 @@ _log_error() {
     #     that will be logged.
     #   - $4 (output_file): The path of the output file associated with the
     #     operation.
+
     local message=$1
     local input_file=$2
     local std_output=$3
@@ -1480,6 +1607,7 @@ _move_file() {
     #     destination are the same file.
     #   - "1" (false): If any required parameters are missing, if the move
     #     fails, or if an invalid conflict parameter is provided.
+
     local par_when_conflict=${1:-"skip"}
     local file_src=$2
     local file_dst=$3
@@ -1546,6 +1674,7 @@ _move_temp_file_to_output() {
     #     location.
     #   - $3 (output_file): The target path where the temp file should be
     #     moved.
+
     local input_file=$1
     local temp_file=$2
     local output_file=$3
@@ -1586,6 +1715,7 @@ _open_items_locations() {
     #   - $2 (resolve_links): A boolean-like string ("true" or "false")
     #   indicating whether symbolic links in the provided paths should be
     #   resolved to their target locations before opening.
+
     local items=$1
     local resolve_links=$2
 
@@ -1619,8 +1749,8 @@ _open_items_locations() {
     items=$(sed "s|\./|$working_dir/|g" <<<"$items")
 
     # Prepare items to be opened by the file manager.
-    local item=""
     local items_open=""
+    local item=""
     for item in $items; do
         # Skip the root directory ("/") since opening it is redundant.
         if [[ "$item" == "/" ]]; then
@@ -1632,7 +1762,6 @@ _open_items_locations() {
             item=$(readlink -f "$item")
         fi
         items_open+="$item$FIELD_SEPARATOR"
-
     done
 
     # Open the items using the detected file manager.
@@ -1675,6 +1804,7 @@ _pkg_get_package_manager() {
     #     - "zypper": Indicates that "zypper" (openSUSE) is available.
     #   - If no supported package manager is found, the output is an empty
     #     string.
+
     local pkg_manager=""
 
     # Check for an installed package manager.
@@ -1705,6 +1835,7 @@ _pkg_install_packages() {
     #       - "pacman": For Arch Linux systems.
     #       - "zypper": For openSUSE systems.
     #   - $2 (packages): A space-separated list of package names to install.
+
     local pkg_manager=$1
     local packages=$2
 
@@ -1767,6 +1898,7 @@ _pkg_is_package_installed() {
     # Returns:
     #   - "0" (true): If the package is installed.
     #   - "1" (false): If the package is not installed or an error occurs.
+
     local pkg_manager=$1
     local package=$2
 
@@ -1879,10 +2011,11 @@ _run_task_parallel() {
     # Parameters:
     #   - $1 (input_files): A field-separated list of file paths to process.
     #   - $2 (output_dir): The directory where the output files will be stored.
+
     local input_files=$1
     local output_dir=$2
 
-    # Allows the symbol "'" in filenames (inside 'xargs').
+    # Allows the symbol "'" in filenames (inside 'xargs' with 'bash -c').
     input_files=$(sed -z "s|'|'\\\''|g" <<<"$input_files")
 
     # Export variables to be used inside new shells (when using 'xargs').
@@ -1944,12 +2077,14 @@ _run_task_parallel() {
 
 _storage_text_clean() {
     # This function clears all temporary text storage files.
+
     rm -f -- "$TEMP_DIR_STORAGE_TEXT/"* &>/dev/null
 }
 
 _storage_text_read_all() {
     # This function concatenates and outputs the content of all temporary text
     # storage files.
+
     cat -- "$TEMP_DIR_STORAGE_TEXT/"* 2>/dev/null
 }
 
@@ -1958,6 +2093,7 @@ _storage_text_write() {
     #
     # Parameters:
     #   - $1 (input_text): The text to be stored in a temporary file.
+
     local input_text=$1
     local temp_file=""
 
@@ -1973,6 +2109,7 @@ _storage_text_write() {
 _storage_text_write_ln() {
     # This function writes a given input text, followed by a newline character,
     # to a temporary text storage file.
+
     local input_text=$1
 
     if [[ -z "$input_text" ]]; then
@@ -1988,6 +2125,7 @@ _str_human_readable_path() {
     #
     # Parameters:
     #   - $1 (input_path): The input file path to process.
+
     local input_path=$1
     local output_path=""
 
@@ -2015,6 +2153,7 @@ _str_remove_empty_tokens() {
     # Parameters:
     #   - $1 (input_str): The input string containing tokens separated by
     #     $FIELD_SEPARATOR.
+
     local input_str=$1
     input_str=$(tr -s "$FIELD_SEPARATOR" <<<"$input_str")
     input_str=$(sed "s|$FIELD_SEPARATOR$||" <<<"$input_str")
@@ -2031,6 +2170,7 @@ _strip_filename_extension() {
     #
     # Returns:
     #   - The filename without its extension.
+
     local filename=$1
     local extension=""
     extension=$(_get_filename_extension "$filename")
@@ -2069,6 +2209,7 @@ _text_remove_home() {
     #
     #   - Input: "/etc/config" (assuming $HOME is "/home/user")
     #   - Output: "/etc/config"
+
     local input_text=$1
 
     if [[ -n "$HOME" ]]; then
@@ -2098,6 +2239,7 @@ _text_remove_pwd() {
     #   - Input: "/etc/config" (assuming current directory is
     #     "/home/user/project")
     #   - Output: "/etc/config"
+
     local input_text=$1
     local working_dir=""
     working_dir=$(_get_working_directory)
@@ -2119,6 +2261,7 @@ _text_sort() {
     #
     # Returns:
     #   - The sorted text with each line in the correct order.
+
     local input_text=$1
 
     sort --version-sort <<<"$input_text"
@@ -2138,6 +2281,7 @@ _text_uri_decode() {
     # Example:
     #   - Input: "file:///home/user%20name/file%20name.txt"
     #   - Output: "/home/user name/file name.txt"
+
     local uri_encoded=$1
 
     uri_encoded=${uri_encoded//%/\\x}
@@ -2150,6 +2294,7 @@ _text_uri_decode() {
 _unset_global_variables_file_manager() {
     # This function unset global variables that may have been set by different
     # file managers (Caja, Nautilus, Nemo) during script execution.
+
     unset \
         CAJA_SCRIPT_CURRENT_URI \
         CAJA_SCRIPT_NEXT_PANE_CURRENT_URI \
@@ -2187,6 +2332,7 @@ _validate_conflict_filenames() {
     #   - Input: "file1.txt file2.txt file1.jpg"
     #   - Output: An error box will be displayed indicating that "file1" is
     #     duplicated.
+
     local input_files=$1
     local dup_files=""
 
@@ -2205,24 +2351,26 @@ _validate_conflict_filenames() {
 }
 
 _validate_file_mime() {
-    # This function validates the MIME type of a given file against a specified
-    # MIME type pattern.
+    # This function validates the MIME type and optionally the encoding of a
+    # given file. It checks whether the file's MIME type matches a specified
+    # pattern (regex) and, if provided, whether the file's encoding matches
+    # another specified pattern.
     #
     # Parameters:
     #   - $1 (input_file): The path to the file that is being validated. This
     #       is the file whose MIME type will be checked.
-    #   - $2 (par_select_mime): The MIME type pattern (or regular expression)
-    #       to compare the file's MIME type against. If no MIME type pattern is
-    #       provided, no validation occurs.
-    #
-    # Example:
-    #   - Input: File path "example.txt", MIME pattern "text/plain"
-    #   - Output: If the MIME type of "example.txt" is "text/plain", the file
-    #       name will be written to storage.
+    #   - $2 (par_select_mime): A MIME type pattern (or regular expression)
+    #       used to validate the file's MIME type. If this parameter is empty,
+    #       MIME type validation is skipped.
+    #   - $3 (par_skip_encoding): An optional encoding pattern (or regular
+    #       expression) used to validate the file's encoding. If this parameter
+    #       is empty, encoding validation is skipped.
+
     local input_file=$1
     local par_select_mime=$2
+    local par_skip_encoding=$3
 
-    # Validation for files (mime).
+    # Validate MIME type if a pattern is provided.
     if [[ -n "$par_select_mime" ]]; then
         local file_mime=""
         file_mime=$(_get_file_mime "$input_file")
@@ -2231,45 +2379,59 @@ _validate_file_mime() {
             "($par_select_mime)" <<<"$file_mime" || return
     fi
 
+    # Validate encoding if a pattern is provided.
+    if [[ -n "$par_skip_encoding" ]]; then
+        local file_encoding=""
+        file_encoding=$(_get_file_encoding "$input_file")
+        par_skip_encoding=${par_skip_encoding//+/\\+}
+        grep --quiet --ignore-case --perl-regexp \
+            "($par_skip_encoding)" <<<"$file_encoding" && return
+    fi
+
     # Create a temp file containing the name of the valid file.
     _storage_text_write "$input_file$FIELD_SEPARATOR"
 }
 
 _validate_file_mime_parallel() {
-    # This function validates the MIME type of a list of files in parallel,
-    # based on a specified MIME type pattern.
+    # This function validates the MIME types of multiple files in parallel,
+    # based on a specified MIME type pattern. It processes a list of file paths
+    # concurrently using `xargs` and calls the `_validate_file_mime` function
+    # for each file.
     #
     # Parameters:
     #   - $1 (input_files): A space-separated string containing the paths of
     #     the files to validate. These files will be checked for the MIME type
     #     pattern.
     #   - $2 (par_select_mime): The MIME type pattern (or regular expression)
-    #     to compare the files' MIME types against. If this parameter is empty,
-    #     the function returns the input files without any MIME type
-    #     validation.
+    #       used to validate the files' MIME types. If this parameter is empty,
+    #       no MIME type validation is performed, and all input files are
+    #       returned as valid.
+    #   - $3 (par_skip_encoding): An optional encoding pattern (or regular
+    #       expression) used to validate the files' encodings. If this
+    #       parameter is empty, no encoding validation is performed.
     #
     # Example:
     #   - Input: File paths "file1.txt file2.png", MIME pattern "text/plain".
     #   - Output: If "file1.txt" has a MIME type of "text/plain", it will be
     #     included in the output, but "file2.png" will be excluded if its MIME
     #     type doesn't match.
+
     local input_files=$1
     local par_select_mime=$2
+    local par_skip_encoding=$3
 
-    # Return the 'input_files' if all parameters are empty.
-    if [[ -z "$par_select_mime" ]]; then
-        printf "%s" "$input_files"
-        return
-    fi
-
-    # Allows the symbol "'" in filenames (inside 'xargs').
+    # Allows the symbol "'" in filenames (inside 'xargs' with 'bash -c').
     input_files=$(sed -z "s|'|'\\\''|g" <<<"$input_files")
 
     # Export variables to be used inside new shells (when using 'xargs').
     export FIELD_SEPARATOR TEMP_DIR_STORAGE_TEXT
 
     # Export functions to be used inside new shells (when using 'xargs').
-    export -f _get_file_mime _storage_text_write _validate_file_mime
+    export -f \
+        _get_file_encoding \
+        _get_file_mime \
+        _storage_text_write \
+        _validate_file_mime
 
     # Execute the function '_validate_file_mime' for each file in parallel
     # (using 'xargs').
@@ -2278,7 +2440,8 @@ _validate_file_mime_parallel() {
         --delimiter="$FIELD_SEPARATOR" \
         --max-procs="$(_get_max_procs)" \
         --replace="{}" \
-        bash -c "_validate_file_mime '{}' '$par_select_mime'"
+        bash -c \
+        "_validate_file_mime '{}' '$par_select_mime' '$par_skip_encoding'"
 
     # Compile valid files in a single list.
     input_files=$(_storage_text_read_all)
@@ -2286,78 +2449,6 @@ _validate_file_mime_parallel() {
 
     input_files=$(_str_remove_empty_tokens "$input_files")
     printf "%s" "$input_files"
-}
-
-_validate_file_preselect() {
-    # This function filters a list of files or directories based on various
-    # user-specified criteria, such as file type, extensions, and recursion.
-    #
-    # Parameters:
-    #   - $1 (input_files): A space-separated string containing file or
-    #     directory paths to filter. These paths are passed to the "find"
-    #     command.
-    #   - $2 (par_type): A string specifying the type of file to search for. It
-    #     can be:
-    #     - "file": To search for files and symbolic links.
-    #     - "directory": To search for directories and symbolic links.
-    #   - $3 (par_skip_extension): A string of file extensions to exclude from
-    #     the search. Only files with extensions not matching this list will be
-    #     included.
-    #   - $4 (par_select_extension): A string of file extensions to include in
-    #     the search. Only files with matching extensions will be included.
-    #   - $5 (par_recursive): A boolean string ("true" or any other value)
-    #     indicating whether to search directories recursively. If set to
-    #     "true", directories will be searched recursively; otherwise, only the
-    #     immediate directory level will be searched.
-    #
-    # Example:
-    #   - Input: "dir1 dir2", "file", "", "txt|pdf", "true"
-    #   - Output: A list of files with extensions ".txt" or ".pdf" from the
-    #     directories "dir1" and "dir2", searched recursively.
-    local input_files=$1
-    local par_type=$2
-    local par_skip_extension=$3
-    local par_select_extension=$4
-    local par_recursive=$5
-    local input_files_valid=""
-
-    input_files=$(sed "s|'|'\"'\"'|g" <<<"$input_files")
-    input_files=$(sed "s|$FIELD_SEPARATOR|' '|g" <<<"$input_files")
-
-    # Build a 'find' command.
-    find_command="find '$input_files'"
-
-    if [[ "$par_recursive" != "true" ]]; then
-        find_command+=" -maxdepth 0"
-    fi
-
-    # Expand the directories with the 'find' command.
-    case "$par_type" in
-    "file") find_command+=" \( -type l -o -type f \)" ;;
-    "directory") find_command+=" \( -type l -o -type d \)" ;;
-    esac
-
-    if [[ -n "$par_select_extension" ]]; then
-        find_command+=" -regextype posix-extended "
-        find_command+=" -regex \".*\.($par_select_extension)$\""
-    fi
-
-    if [[ -n "$par_skip_extension" ]]; then
-        find_command+=" -regextype posix-extended "
-        find_command+=" ! -regex \".*\.($par_skip_extension)$\""
-    fi
-
-    find_command+=" ! -path \"$IGNORE_FIND_PATH\""
-    # shellcheck disable=SC2089
-    find_command+=" -print0"
-
-    # shellcheck disable=SC2086
-    input_files_valid=$(eval $find_command 2>/dev/null |
-        tr "\0" "$FIELD_SEPARATOR")
-    input_files_valid=$(_str_remove_empty_tokens "$input_files_valid")
-
-    # Create a temp file containing the name of the valid file.
-    printf "%s" "$input_files_valid"
 }
 
 _validate_files_count() {
@@ -2389,6 +2480,7 @@ _validate_files_count() {
     #   - Output: The function checks if the directories "dir1" and "dir2"
     #     contain at least 1 and no more than 5 ".txt" or ".pdf" files,
     #     recursively.
+
     local input_files=$1
     local par_type=$2
     local par_select_extension=$3
