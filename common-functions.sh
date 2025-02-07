@@ -71,11 +71,13 @@ _cleanup_on_exit() {
     # This function performs cleanup tasks when the script exits. It is
     # designed to safely and efficiently remove temporary directories or files
     # that were created during the script's execution.
+
     # Remove local temporary dirs or files.
     local items_to_remove=""
     items_to_remove=$(cat -- "$TEMP_DIR_ITEMS_TO_REMOVE/"* 2>/dev/null)
 
-    # Allows the symbol "'" in filenames (inside 'xargs' with 'bash -c').
+    # Escape single quotes in filenames to handle them correctly in 'xargs'
+    # with 'bash -c'.
     items_to_remove=$(sed -z "s|'|'\\\''|g" <<<"$items_to_remove")
 
     printf "%s" "$items_to_remove" | xargs \
@@ -87,6 +89,7 @@ _cleanup_on_exit() {
 
     # Remove the main temporary dir.
     rm -rf -- "$TEMP_DIR" &>/dev/null
+
     if ! _is_gui_session; then
         printf "End of the script.\n" >&2
     fi
@@ -111,6 +114,7 @@ _check_dependencies() {
     #       command=ffmpeg; pkg_manager=dnf; package=ffmpeg-free |
     #       command=ffmpeg; pkg_manager=pacman; package=ffmpeg |
     #       command=ffmpeg; pkg_manager=zypper; package=ffmpeg"
+
     local dependencies=$1
     local packages_to_install=""
     local pkg_manager_installed=""
@@ -139,6 +143,7 @@ _check_dependencies() {
         local command=""
         local package=""
         local pkg_manager=""
+
         # Evaluate the values parameters from the 'dependency' variable.
         eval "$dependency"
 
@@ -198,6 +203,11 @@ _check_output() {
     #   - $2 (std_output): The standard output or error from the command.
     #   - $3 (input_file): The input file associated (if applicable).
     #   - $4 (output_file): The expected output file to verify its existence.
+    #
+    # Returns:
+    #   - "0" (true): If the command was successful and the output file exists.
+    #   - "1" (false): If the command failed or the output file does not exist.
+
     local exit_code=$1
     local std_output=$2
     local input_file=$3
@@ -225,6 +235,11 @@ _command_exists() {
     #
     # Parameters:
     #   - $1 (command_check): The name of the command to verify.
+    #
+    # Returns:
+    #   - "0" (true): If the command is available.
+    #   - "1" (false): If the command is not available.
+
     local command_check=$1
 
     if command -v "$command_check" &>/dev/null; then
@@ -256,6 +271,10 @@ _convert_delimited_string_to_text() {
 _directory_pop() {
     # This function pops the top directory off the directory stack and changes
     # to the previous directory.
+    #
+    # Returns:
+    #   - "0" (true): If the directory was successfully popped and changed.
+    #   - "1" (false): If there was an error popping the directory.
 
     popd &>/dev/null || {
         _log_error "Could not pop a directory." "" "" ""
@@ -271,6 +290,10 @@ _directory_push() {
     # Parameters:
     #   - $1 (directory): The target directory to push onto the directory stack
     #     and navigate to.
+    #
+    # Returns:
+    #   - "0" (true): If the directory was successfully pushed and changed.
+    #   - "1" (false): If there was an error pushing the directory.
 
     local directory=$1
 
@@ -305,6 +328,7 @@ _convert_text_to_delimited_string() {
 _display_dir_selection_box() {
     # This function presents a graphical interface to allow the user to select
     # one or more directories.
+
     local input_files=""
 
     if _command_exists "zenity"; then
@@ -360,6 +384,7 @@ _display_error_box() {
     #
     # Parameters:
     #   - $1 (message): The error message to display.
+
     local message=$1
 
     if ! _is_gui_session; then
@@ -382,6 +407,7 @@ _display_info_box() {
     #
     # Parameters:
     #   - $1 (message): The information message to display.
+
     local message=$1
 
     if ! _is_gui_session; then
@@ -412,6 +438,7 @@ _display_list_box() {
     #   indicating whether symbolic links in item paths should be resolved to
     #   their target locations when opening the item's location. Defaults to
     #   "true".
+
     local message=$1
     local columns=$2
     local item_name=${3:-"items"}
@@ -483,6 +510,7 @@ _display_password_box() {
     #
     # Parameters:
     #   - $1 (message): A message to display as a prompt for the password.
+
     local message=$1
     local password=""
 
@@ -506,6 +534,7 @@ _display_password_box() {
 _display_password_box_define() {
     # This function prompts the user to enter a password and ensures the
     # password is not empty.
+
     local message="Type your password:"
     local password=""
 
@@ -526,6 +555,7 @@ _display_question_box() {
     #
     # Parameters:
     #   - $1 (message): The question message to display to the user.
+
     local message=$1
     local response=""
 
@@ -552,6 +582,7 @@ _display_text_box() {
     # Parameters:
     #   - $1 (message): The message to display. If empty, a default message
     #     "(Empty result)" is shown.
+
     local message=$1
     _close_wait_box
     _logs_consolidate ""
@@ -584,9 +615,9 @@ _display_result_box() {
     # Parameters:
     #   - $1 (output_dir): The directory where output files are stored or
     #     expected to be.
+
     local output_dir=$1
     _close_wait_box
-
     _logs_consolidate "$output_dir"
 
     # If 'output_dir' parameter is defined.
@@ -617,6 +648,7 @@ _display_wait_box() {
     # Parameters:
     #   - $1 (open_delay): Optional. The delay (in seconds) before the wait box
     #     is shown. Defaults to 2 seconds if not provided.
+
     local open_delay=${1:-"2"}
     local message="Running the task. Please, wait..."
 
@@ -632,6 +664,7 @@ _display_wait_box_message() {
     #     "Running the task. Please, wait...").
     #   - $2 (open_delay): Optional. The delay (in seconds) before the wait box
     #     is shown. Defaults to 2 seconds if not provided.
+
     local message=$1
     local open_delay=${2:-"2"}
 
@@ -701,6 +734,7 @@ _close_wait_box() {
     # This function is responsible for closing any open "wait boxes" (progress
     # indicators) that were displayed during the execution of a task. It checks
     # for both Zenity and KDialog wait boxes and handles their closure.
+
     # Check if 'wait_box' will open.
     if [[ -f "$WAIT_BOX_CONTROL" ]]; then
         rm -f -- "$WAIT_BOX_CONTROL" # Cancel the future open.
@@ -731,7 +765,9 @@ _exit_script() {
     # This function is responsible for safely exiting the script by terminating
     # all child processes associated with the current script and printing an
     # exit message to the terminal.
+
     _close_wait_box
+
     local child_pids=""
     local script_pid=$$
 
@@ -820,6 +856,7 @@ _find_filtered_files() {
     # Return the filtered files.
     printf "%s" "$filtered_files"
 }
+
 _gdbus_notify() {
     # This function sends a desktop notification using the "gdbus" tool, which
     # interfaces with the D-Bus notification system (specifically the
@@ -829,6 +866,7 @@ _gdbus_notify() {
     #   - $1 (icon): The icon to display with the notification.
     #   - $2 (title): The title of the notification.
     #   - $3 (body): The main message to be displayed in the notification.
+
     local icon=$1
     local title=$2
     local body=$3
@@ -848,6 +886,7 @@ _get_filename_dir() {
     #
     # Parameters:
     #   - $1 (input_filename): The full path or relative path to the file.
+
     local input_filename=$1
     local dir=""
 
@@ -861,6 +900,7 @@ _get_filename_extension() {
     #
     # Parameters:
     #   - $1 (filename): The input filename (can be absolute or relative).
+
     local filename=$1
     filename=$(sed -E "s|.*/(\.)*||g" <<<"$filename")
     filename=$(sed -E "s|^(\.)*||g" <<<"$filename")
@@ -875,6 +915,7 @@ _get_filename_full_path() {
     #
     # Parameters:
     #   - $1 (input_filename): The input filename or relative path.
+
     local input_filename=$1
     local full_path=$input_filename
     local dir=""
@@ -896,6 +937,7 @@ _get_filename_next_suffix() {
     #   - $1 (filename): The input filename or path. This can be an absolute or
     #   relative filename. If the input file has an extension, it will be
     #   stripped for the purpose of generating the new filename.
+
     local filename=$1
     local filename_result=$filename
     local filename_base=""
@@ -920,12 +962,12 @@ _get_filename_next_suffix() {
     printf "%s" "$filename_result"
 }
 
-
 _get_filenames_filemanager() {
     # This function retrieves a list of selected filenames or URIs from a file
     # manager (such as Caja, Nemo, or Nautilus) and processes the input
     # accordingly. If no selection is detected, it falls back to using a
     # standard input file list.
+
     local input_files=""
 
     # Try to use the information provided by the file manager.
@@ -980,10 +1022,10 @@ _get_files() {
     #   - "par_sort_list": If "true", sorts the list of files.
     #   - "par_validate_conflict": If "true", validates for filenames with the
     #     same base name.
+
     local parameters=$1
     local input_files=""
     input_files=$(_get_filenames_filemanager)
-
 
     # Default values for input parameters.
     local par_get_pwd="false"
@@ -1028,6 +1070,7 @@ _get_files() {
 
     local initial_items_count=0
     initial_items_count=$(_get_items_count "$input_files")
+
     local find_parameters=""
     if ((initial_items_count == 1)) && [[ -d "$input_files" ]] &&
         [[ "$par_recursive" == "false" ]] &&
@@ -1100,6 +1143,7 @@ _get_file_encoding() {
     # Parameters:
     #   - $1 (filename): The path to the file whose encoding is to be
     #     determined.
+
     local filename=$1
     local std_output=""
 
@@ -1118,6 +1162,7 @@ _get_file_mime() {
     #
     # Parameters:
     #   - $1 (filename): The path to the file whose MIME is to be determined.
+
     local filename=$1
     local std_output=""
 
@@ -1155,6 +1200,7 @@ _get_items_count() {
 _get_max_procs() {
     # This function returns the maximum number of processing units (CPU cores)
     # available on the system.
+
     nproc --all 2>/dev/null
 }
 
@@ -1172,6 +1218,7 @@ _get_output_dir() {
     #   directory (e.g., current working directory or an alternative with write
     #   permissions) as the output directory. If "false" or not set, a new
     #   subdirectory is created for the output.
+
     local parameters=$1
     local base_dir=""
     local output_dir=""
@@ -1232,6 +1279,7 @@ _get_output_filename() {
     #     - par_prefix: A string to be added as prefix to the output filename.
     #     - par_suffix: A string to be added as suffix to the output
     #       filename, placed before the extension.
+
     local input_file=$1
     local output_dir=$2
     local parameters=$3
@@ -1312,10 +1360,12 @@ _get_qdbus_command() {
     compgen -c | grep --perl-regexp -m1 "^qdbus" || return 1
     return 0
 }
+
 _get_script_name() {
     # This function returns the name of the currently executing script. It uses
     # the "basename" command to extract the script's filename from the full
     # path provided by "$0".
+
     basename -- "$0"
 }
 
@@ -1332,6 +1382,7 @@ _get_temp_dir_local() {
     #
     # Output:
     #   - The full path to the newly created temporary directory.
+
     local output_dir=$1
     local basename=$2
     local temp_dir=""
@@ -1353,6 +1404,7 @@ _get_temp_file() {
     #
     # Output:
     #   - The full path to the newly created temporary file.
+
     local temp_file=""
     temp_file=$(mktemp --tmpdir="$TEMP_DIR_TASK")
 
@@ -1367,6 +1419,7 @@ _get_temp_file_dry() {
     #
     # Output:
     #   - The path of the temporary file, without actually creating the file.
+
     local temp_file=""
     temp_file=$(mktemp --dry-run --tmpdir="$TEMP_DIR_TASK")
 
@@ -1384,6 +1437,7 @@ _get_working_directory() {
     #
     # Output:
     #   - The determined working directory.
+
     local working_directory=""
 
     # Try to use the information provided by the file manager.
@@ -1439,11 +1493,17 @@ _is_directory_empty() {
     fi
     return 1
 }
+
 _is_gui_session() {
     # This function checks whether the script is running in a graphical user
     # interface (GUI) session. It does so by checking if the DISPLAY
     # environment variable is set, which is typically present in GUI sessions
     # (e.g., X11 or Wayland).
+    #
+    # Returns:
+    #   - "0" (true): If is a GUI session.
+    #   - "1" (false): If is not a GUI session.
+
     if env | grep --quiet "^DISPLAY"; then
         return 0
     fi
@@ -1463,6 +1523,7 @@ _log_error() {
     #     that will be logged.
     #   - $4 (output_file): The path of the output file associated with the
     #     operation.
+
     local message=$1
     local input_file=$2
     local std_output=$3
@@ -1551,6 +1612,7 @@ _move_file() {
     #     destination are the same file.
     #   - "1" (false): If any required parameters are missing, if the move
     #     fails, or if an invalid conflict parameter is provided.
+
     local par_when_conflict=${1:-"skip"}
     local file_src=$2
     local file_dst=$3
@@ -1617,6 +1679,7 @@ _move_temp_file_to_output() {
     #     location.
     #   - $3 (output_file): The target path where the temp file should be
     #     moved.
+
     local input_file=$1
     local temp_file=$2
     local output_file=$3
@@ -1657,6 +1720,7 @@ _open_items_locations() {
     #   - $2 (resolve_links): A boolean-like string ("true" or "false")
     #   indicating whether symbolic links in the provided paths should be
     #   resolved to their target locations before opening.
+
     local items=$1
     local resolve_links=$2
 
@@ -1703,8 +1767,10 @@ _open_items_locations() {
             item=$(readlink -f "$item")
         fi
         items_open+="$item$FIELD_SEPARATOR"
-
     done
+
+    # Remove the trailing field separator.
+    items_open=$(_str_remove_empty_tokens "$items_open")
 
     # Open the items using the detected file manager.
     case "$file_manager" in
@@ -1746,6 +1812,7 @@ _pkg_get_package_manager() {
     #     - "zypper": Indicates that "zypper" (openSUSE) is available.
     #   - If no supported package manager is found, the output is an empty
     #     string.
+
     local pkg_manager=""
 
     # Check for an installed package manager.
@@ -1776,6 +1843,7 @@ _pkg_install_packages() {
     #       - "pacman": For Arch Linux systems.
     #       - "zypper": For openSUSE systems.
     #   - $2 (packages): A space-separated list of package names to install.
+
     local pkg_manager=$1
     local packages=$2
 
@@ -1838,6 +1906,7 @@ _pkg_is_package_installed() {
     # Returns:
     #   - "0" (true): If the package is installed.
     #   - "1" (false): If the package is not installed or an error occurs.
+
     local pkg_manager=$1
     local package=$2
 
@@ -1950,11 +2019,9 @@ _run_task_parallel() {
     # Parameters:
     #   - $1 (input_files): A field-separated list of file paths to process.
     #   - $2 (output_dir): The directory where the output files will be stored.
+
     local input_files=$1
     local output_dir=$2
-
-    # Allows the symbol "'" in filenames (inside 'xargs' with 'bash -c').
-    input_files=$(sed -z "s|'|'\\\''|g" <<<"$input_files")
 
     # Export variables to be used inside new shells (when using 'xargs').
     export \
@@ -2005,6 +2072,10 @@ _run_task_parallel() {
         _text_remove_pwd \
         _text_uri_decode
 
+    # Escape single quotes in filenames to handle them correctly in 'xargs'
+    # with 'bash -c'.
+    input_files=$(sed -z "s|'|'\\\''|g" <<<"$input_files")
+
     printf "%s" "$input_files" | xargs \
         --no-run-if-empty \
         --delimiter="$FIELD_SEPARATOR" \
@@ -2015,12 +2086,14 @@ _run_task_parallel() {
 
 _storage_text_clean() {
     # This function clears all temporary text storage files.
+
     rm -f -- "$TEMP_DIR_STORAGE_TEXT/"* &>/dev/null
 }
 
 _storage_text_read_all() {
     # This function concatenates and outputs the content of all temporary text
     # storage files.
+
     cat -- "$TEMP_DIR_STORAGE_TEXT/"* 2>/dev/null
 }
 
@@ -2029,6 +2102,7 @@ _storage_text_write() {
     #
     # Parameters:
     #   - $1 (input_text): The text to be stored in a temporary file.
+
     local input_text=$1
     local temp_file=""
 
@@ -2044,6 +2118,7 @@ _storage_text_write() {
 _storage_text_write_ln() {
     # This function writes a given input text, followed by a newline character,
     # to a temporary text storage file.
+
     local input_text=$1
 
     if [[ -z "$input_text" ]]; then
@@ -2059,6 +2134,7 @@ _str_human_readable_path() {
     #
     # Parameters:
     #   - $1 (input_path): The input file path to process.
+
     local input_path=$1
     local output_path=""
 
@@ -2086,6 +2162,7 @@ _str_remove_empty_tokens() {
     # Parameters:
     #   - $1 (input_str): The input string containing tokens separated by
     #     $FIELD_SEPARATOR.
+
     local input_str=$1
     input_str=$(tr -s "$FIELD_SEPARATOR" <<<"$input_str")
     input_str=$(sed "s|$FIELD_SEPARATOR$||" <<<"$input_str")
@@ -2102,6 +2179,7 @@ _strip_filename_extension() {
     #
     # Returns:
     #   - The filename without its extension.
+
     local filename=$1
     local extension=""
     extension=$(_get_filename_extension "$filename")
@@ -2140,6 +2218,7 @@ _text_remove_home() {
     #
     #   - Input: "/etc/config" (assuming $HOME is "/home/user")
     #   - Output: "/etc/config"
+
     local input_text=$1
 
     if [[ -n "$HOME" ]]; then
@@ -2169,6 +2248,7 @@ _text_remove_pwd() {
     #   - Input: "/etc/config" (assuming current directory is
     #     "/home/user/project")
     #   - Output: "/etc/config"
+
     local input_text=$1
     local working_directory=""
     working_directory=$(_get_working_directory)
@@ -2190,6 +2270,7 @@ _text_sort() {
     #
     # Returns:
     #   - The sorted text with each line in the correct order.
+
     local input_text=$1
 
     sort --version-sort <<<"$input_text"
@@ -2209,6 +2290,7 @@ _text_uri_decode() {
     # Example:
     #   - Input: "file:///home/user%20name/file%20name.txt"
     #   - Output: "/home/user name/file name.txt"
+
     local uri_encoded=$1
 
     uri_encoded=${uri_encoded//%/\\x}
@@ -2221,6 +2303,7 @@ _text_uri_decode() {
 _unset_global_variables_file_manager() {
     # This function unset global variables that may have been set by different
     # file managers (Caja, Nautilus, Nemo) during script execution.
+
     unset \
         CAJA_SCRIPT_CURRENT_URI \
         CAJA_SCRIPT_NEXT_PANE_CURRENT_URI \
@@ -2258,19 +2341,25 @@ _validate_conflict_filenames() {
     #   - Input: "file1.txt file2.txt file1.jpg"
     #   - Output: An error box will be displayed indicating that "file1" is
     #     duplicated.
+
     local input_files=$1
-    local dup_files=""
+    local filenames=""
 
     filenames=$(printf "%s" "$input_files" | tr "$FIELD_SEPARATOR" "\0" |
         sed -z "s|/\.|//|" | # Ignore hidden files without extension.
         sed -z --regexp-extended \
             "s|(\.tar)?\.[a-z0-9_~-]{0,15}$||I" | # Remove file extensions.
         sort --zero-terminated --version-sort |   # Sort files.
-        uniq --zero-terminated --repeated)        # Find duplicate base names.
+        uniq --zero-terminated --repeated |       # Find duplicate base names.
+        tr "\0" "$FIELD_SEPARATOR")
 
     # If duplicates are found, display an error and exit the script.
-    if [[ -n "$dup_files" ]]; then
-        _display_error_box "There are selected files with the same base name!"
+    if [[ -n "$filenames" ]]; then
+        local basenames=""
+        # shellcheck disable=SC2086
+        basenames=$(basename --multiple -- $filenames)
+        _display_error_box \
+            "There are selected files with the same base name:\n$basenames"
         _exit_script
     fi
 }
@@ -2290,6 +2379,7 @@ _validate_file_mime() {
     #   - $3 (par_skip_encoding): An optional encoding pattern (or regular
     #       expression) used to validate the file's encoding. If this parameter
     #       is empty, encoding validation is skipped.
+
     local input_file=$1
     local par_select_mime=$2
     local par_skip_encoding=$3
@@ -2339,12 +2429,10 @@ _validate_file_mime_parallel() {
     #   - Output: If "file1.txt" has a MIME type of "text/plain", it will be
     #     included in the output, but "file2.png" will be excluded if its MIME
     #     type doesn't match.
+
     local input_files=$1
     local par_select_mime=$2
     local par_skip_encoding=$3
-
-    # Allows the symbol "'" in filenames (inside 'xargs' with 'bash -c').
-    input_files=$(sed -z "s|'|'\\\''|g" <<<"$input_files")
 
     # Export variables to be used inside new shells (when using 'xargs').
     export FIELD_SEPARATOR TEMP_DIR_STORAGE_TEXT
@@ -2355,6 +2443,10 @@ _validate_file_mime_parallel() {
         _get_file_mime \
         _storage_text_write \
         _validate_file_mime
+
+    # Escape single quotes in filenames to handle them correctly in 'xargs'
+    # with 'bash -c'.
+    input_files=$(sed -z "s|'|'\\\''|g" <<<"$input_files")
 
     # Execute the function '_validate_file_mime' for each file in parallel
     # (using 'xargs').
@@ -2403,6 +2495,7 @@ _validate_files_count() {
     #   - Output: The function checks if the directories "dir1" and "dir2"
     #     contain at least 1 and no more than 5 ".txt" or ".pdf" files,
     #     recursively.
+
     local input_files=$1
     local par_type=$2
     local par_select_extension=$3
