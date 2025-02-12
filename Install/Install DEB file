@@ -2,7 +2,7 @@
 
 __DEBUG_LOG_FILE="$(basename "${BASH_SOURCE[0]}").log"
 # shellcheck source=scripts/_debug_output
-source ~/scripts/_debug_output
+# source ~/scripts/_debug_output
 
 # Source the script 'common-functions.sh'.
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &> /dev/null && pwd)
