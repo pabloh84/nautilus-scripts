@@ -10,6 +10,7 @@ __DEBUG_LOG_FILE="$(basename "${BASH_SOURCE[0]}").log"
 #shellcheck source=/home/pablo/scripts/_debug_output
 # source ~/scripts/_debug_output
 
+
 _main() {
     local input_files=""
     local output_dir=""
@@ -30,12 +31,15 @@ _main_task() {
     local dir=""
     local filename=""
 
+    echo "echo $input_file"
+    echo "echo $output_dir"
+
     dir=$(dirname -- "$input_file")
     filename=$(basename -- "$input_file")
 
     # Run the main process.
     # _move_file "skip" "$input_file" "$dir/$filename".bak || return 1
-    bak "$input_file"
+    bakc "$input_file"
 }
 
 _main "$@"
