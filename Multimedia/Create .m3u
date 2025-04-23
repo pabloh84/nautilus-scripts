@@ -11,7 +11,6 @@ source "$ROOT_DIR/common-functions.sh"
 
 # Initial checks
 _check_dependencies zenity || exit 1
-INPUT_FILES=$(_get_files "$*" "d" "1" "" "") || exit 1
 
 function create_m3u_file {
     __INPUT_FOLDER="$1"
@@ -25,7 +24,7 @@ function create_m3u_file {
         return 1
     fi
 
-    mapfile -t __AUDIO_FILES < <(find "$__INPUT_FOLDER" -maxdepth 1 -type f -iname "*.mp3" -o -iname "*.ogg" -o -iname "*.flac" -o -iname "*.wav" -o -iname "*.aac")
+    mapfile -t __AUDIO_FILES < <(find "$__INPUT_FOLDER" -maxdepth 1 -type f -iname "*.mp3" -o -iname "*.ogg" -o -iname "*.mkv" -o -iname "*.flac" -o -iname "*.wav" -o -iname "*.aac")
     # __AUDIO_FILES=$(find "$__INPUT_FOLDER" -type f -iname "*.mp3" -o -iname "*.ogg" -o -iname "*.flac" -o -iname "*.wav" -o -iname "*.aac")
     # if [ -z "$__AUDIO_FILES" ]; then
     if [[ ${#__AUDIO_FILES[@]} -eq 0 ]]; then
@@ -46,31 +45,37 @@ function create_m3u_file {
 
     echo "Playlist created successfully: $__OUTPUT_PLAYLIST"
 }
-export -f create_m3u_file
+
+_main()
+{
+    local input_files=""
+    local output_dir=""
+
+    input_files=$(_get_files "par_type=directory; par_validate_conflict=true; par_max_items=1")
+    output_dir="$input_files"
+
+    export -f create_m3u_file
+
+    # Execute the function '_main_task' for each file in parallel.
+    _run_task_parallel "$input_files" "$output_dir"
+    _display_result_box "$output_dir"
+}
 
 _main_task() {
-    local __FOLDER=$1
-    local OUTPUT_DIR=$2
-    local STD_OUTPUT
-    local EXIT_CODE
-    local OUTPUT_FILE
+    local input_file=$1
+    local output_dir=$2
+    local std_output
+    local output_file
 
-    echo "Main Task Treating $__FOLDER"
-    # OUTPUT_FILE="$OUTPUT_DIR/$(_get_filename_without_extension "$__FOLDER").zip"
-    OUTPUT_FILE="$__FOLDER"/"$__FOLDER".m3u
-    # STD_OUTPUT=$(zip -9 -r "$OUTPUT_FILE" "$__FOLDER" 2>&1)
-    STD_OUTPUT=$(create_m3u_file "$__FOLDER" "$__FOLDER"/"$__FOLDER".m3u)
-    EXIT_CODE=$?
-    _log_error_result "$__FOLDER" "$STD_OUTPUT" "$OUTPUT_DIR" "$EXIT_CODE" "$OUTPUT_FILE"
+    echo "Main Task Treating $input_file"
+    # output_file="$OUTPUT_DIR/$(_get_filename_without_extension "$input_file").zip"
+    # output_file="$input_file"/"$input_file".m3u
+    output_file=$(_get_output_filename "$input_file" "$output_dir" "par_extension_opt=replace; par_extension=m3u")
+
+    # std_output=$(zip -9 -r "$output_file" "$input_file" 2>&1)
+    std_output=$(create_m3u_file "$input_file" "$output_file")
+    _check_output "$?" "$std_output" "$input_file" "$output_file" || return 1
 
 }
-_run_parallel_tasks "$INPUT_FILES"
-_display_result_tasks "$PWD"
 
-# Run the main process
-# shellcheck disable=SC2086
-# STD_OUTPUT=$(find $INPUT_FILES -type d -empty ! -path "*.git/*")
-# STD_OUTPUT=$(echo "$STD_OUTPUT" | sort -V)
-# STD_OUTPUT=$(echo "$STD_OUTPUT" | sed -r "s|(.+)|\"\1\"|")
-
-# _display_info_box "$STD_OUTPUT" "Empty directories"
+_main "$@"
