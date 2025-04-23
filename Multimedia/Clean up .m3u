@@ -21,7 +21,7 @@ _main()
 
 _main_task() {
     local FILE=$1
-    sed -i.bak '/^[^#]/ {s|[*]|-|g;s|:| -|g}' "$FILE"
+    sed -i.bak "/^[^#]/ { s/[\*]/-/g; s/:/ -/g; s/[ ¿?¡!\"\'\`]//g; }" "$FILE"
 }
 
 _main "$@"
