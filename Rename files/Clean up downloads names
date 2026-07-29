@@ -1,180 +1,218 @@
-#!/bin/bash
-
-__DEBUG_LOG_FILE="$(basename "${BASH_SOURCE[0]}").log"
-# shellcheck source=scripts/_debug_output
-# source ~/scripts/_debug_output
+#!/usr/bin/env bash
+# shellcheck disable=SC1091,SC2001
 
 # Source the script '.common-functions.sh'.
-SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &> /dev/null && pwd)
-ROOT_DIR=$(grep --only-matching "^.*scripts[^/]*" <<< "$SCRIPT_DIR")
+SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
+ROOT_DIR=$(grep --only-matching "^.*scripts[^/]*" <<<"$SCRIPT_DIR")
 source "$ROOT_DIR/.common-functions.sh"
 
-get_file_extension() {
-    local FILE="$1"
-    if [[ -f $FILE ]]; then
-        echo "${FILE##*.}"
-    fi
+_main() {
+    local input_files=""
+    local output_dir=""
+
+    # Execute initial checks.
+    _check_dependencies ""
+    _display_wait_box
+    input_files=$(_get_files "par_type=all")
+
+    # Export functions for parallel execution worker processes.
+    export -f _main_task \
+        _clean_up_item \
+        _clean_directory \
+        _parse_tv_show \
+        _parse_movie \
+        _strip_junk_tags \
+        _title_case
+
+    # Execute the function '_main_task' for each item in parallel.
+    _run_task_parallel "$input_files" "$output_dir"
+    _display_result_box ""
 }
 
-guess_file_type() {
-    local FILE
-    FILE=$(basename "$1")
-    if [[ $FILE =~ (.*)([Ss][0-9][0-9][Ee][0-9][0-9])(.*) ]]; then # TV Show File
-        echo "TV Show"
-    elif [[ $FILE =~ (.*)([1,2][0,9][0-9]{2})(.*) ]]; then # Film File
-        echo "Film"
-    else
-        echo "Unknown"
-    fi
-}
-
-rename_file() {
-    local FILE="$1"
-    local NEW_FILE_NAME="$2"
-    local EXTENSION="$3"
-    local FILE_PATH
-    FILE_PATH=$(dirname "$FILE")
-    local FILE_NAME
-    FILE_NAME=$(basename "$FILE")
-
-    local DESTINATION_NAME
-    if [[ -z $EXTENSION ]]; then
-        DESTINATION_NAME=$NEW_FILE_NAME
-    else
-        DESTINATION_NAME=${NEW_FILE_NAME}.${EXTENSION}
-    fi
-
-    if _display_question_box "Change\n<span foreground='red'>${FILE_NAME}</span>\nto\n<span foreground='green'>${DESTINATION_NAME}</span>?"; then
-        if mv "${FILE_PATH}/${FILE_NAME}" "${FILE_PATH}/${DESTINATION_NAME}"; then
-            _display_info_box "Success\n${FILE_PATH}/${FILE_NAME}\n-->\n${FILE_PATH}/${DESTINATION_NAME}"
-        else
-            _display_error_box "Error: move failed"
-        fi
-    else
-        _display_info_box "Cancelled"
-    fi
-}
-
-rename_tv_show_file() {
-    local FILE="$1"
-
-    [ -z "$FILE" ] && _display_error_box "Error: No file provided" && return 1
-    [ ! -f "$FILE" ] && _display_error_box "Error: File '$FILE' does not exist" && return 1
-
-    local FILE_NAME
-    local FILE_PATH
-    FILE_NAME=$(basename "$FILE")
-    FILE_PATH=$(dirname "$FILE")
-    if [[ $FILE =~ (.*)([Ss][0-9][0-9][Ee][0-9][0-9])\.(.{3,4})$ ]]; then
-        # zenity --width 600 --info --text "<span foreground=\"green\">$FILE_NAME</span>\n\nAlready seems correct."
-        _display_info_box "$FILE_NAME \nAlready seems correct."
-        return 0
-    fi
-
-    local EXTENSION
-    EXTENSION=$(get_file_extension "$FILE")
-
-    TV_SHOW_NAME=$(basename "$FILE" | sed -E 's/\.1080p*|\.720|\.2160//g' | sed -E 's/(.*)([Ss][0-9][0-9][Ee][0-9][0-9])(.*)\.(.*)/\1/g' | sed 's/\./ /g')
-    TV_SHOW_NAME="$(title_case "$TV_SHOW_NAME")"
-
-    EPISODE=$(basename "$FILE" | sed -E 's/\.1080p*|\.720|\.2160//g' | sed -E 's/(.*)[Ss]([0-9][0-9])[Ee]([0-9][0-9])(.*)\.(.*)/S\2E\3/g')
-
-    NEW_FILE_NAME="${TV_SHOW_NAME} ${EPISODE}"
-
-    rename_file "$FILE" "$NEW_FILE_NAME" "$EXTENSION"
-
-}
-
-rename_film_file() {
-    local FILE="$1"
-
-    [ -z "$FILE" ] && _display_error_box "Error: No file provided" && return 1
-    [ ! -e "$FILE" ] && _display_error_box "Error: File '$FILE' does not exist" && return 1
-
-    local FILE_NAME
-    FILE_NAME=$(basename "$FILE")
-    local FILE_PATH
-    FILE_PATH=$(dirname "$FILE")
-
-    local EXTENSION
-    EXTENSION=$(get_file_extension "$FILE")
-
-    NEW_FILE_NAME=$(basename "$FILE" |
-        sed -E 's/\.1080|\.720|\.2160//g' |
-        sed -E 's/(.*?)(\({0,1}[1,2][0,9][0-9]{2}\){0,1})(.*)\.(.*)/\1(\2)/g' |
-        sed 's/\./ /g' |
-        sed -E 's/\(\(/\(/g' |
-        sed -E 's/\)\)/\)/g')
-
-    rename_file "$FILE" "$NEW_FILE_NAME" "$EXTENSION"
-
-}
-
-title_case() {
-    # Split the string into words and loop through them
+_title_case() {
+    local input=$1
     local output=""
-    for word in $1; do
-        # Capitalize the first letter of each word and append it to the output
+    local word=""
+    for word in $input; do
         output="${output}${word^} "
     done
-    # Remove the trailing space using the read command
-    IFS=' ' read -r output <<< "$output"
-    # Echo the output
-    echo "$output"
+    printf "%s" "${output% }"
 }
 
-clean_up_file() {
-    local FILE
-    FILE="$1"
-    case $(guess_file_type "$FILE") in
-        "TV Show")
-            # _display_info_box "FILE: I guess TV Show File"
-            rename_tv_show_file "$FILE"
-            ;;
-        "Film")
-            # _display_info_box "FILE: I guess Film"
-            rename_film_file "$FILE"
-            ;;
-        *)
-            _display_info_box "Could not determine whether file is TV Show or Film"
-            ;;
-    esac
+_strip_junk_tags() {
+    local text=$1
+    text=$(sed -E 's/[\._]/ /g' <<<"$text")
+    text=$(sed -E 's/\b(1080p?|720p?|2160p?|4k|uhd|480p?|576p?|1080i)\b//gI' <<<"$text")
+    text=$(sed -E 's/\b(x264|x265|h264|h265|hevc|avc|xvid|divx|10bit|8bit|hdr10\+?|hdr|dv|dovi)\b//gI' <<<"$text")
+    text=$(sed -E 's/\b(web-?dl|web-?rip|web|bluray|bdrip|brrip|hdtv|dvdrip|remux)\b//gI' <<<"$text")
+    text=$(sed -E 's/\b(aac|dts(-?hd)?|truehd|atmos|dd5\.?1|ac3|5\.1|7\.1|flac|mp3)\b//gI' <<<"$text")
+    text=$(sed -E 's/\b(proper|repack|extended|uncut|directors\.?cut|multi|subbed|dubbed)\b//gI' <<<"$text")
+    text=$(sed -E 's/ - [A-Za-z0-9]+$//g; s/-[A-Za-z0-9]+$//g' <<<"$text")
+    text=$(sed -E 's/ +/ /g; s/^ +| +$//g' <<<"$text")
+    printf "%s" "$text"
 }
 
-INPUT_FILE_LIST=$(_get_files "par_type=all")
-INPUT_FILE_LIST=$(sed -z "s|'|'\\\''|g" <<< "$INPUT_FILE_LIST")
-for FILE in $INPUT_FILE_LIST; do
-    if [ -f "$FILE" ]; then
-        clean_up_file "$FILE"
-    elif [ -d "$FILE" ]; then
-        case $(guess_file_type "$FILE") in
-            "TV Show")
-                _display_info_box "FOLDER: I guess TV Show Folder"
-                rm "$FILE"/*.nfo
-                rm "$FILE"/*.txt
-                rm -rf "$FILE"/[Ss]creens
-                for FILE_IN_FOLDER in "$FILE"/*; do
-                    clean_up_file "$FILE_IN_FOLDER"
-                done
-                bash -c "\"${ROOT_DIR}/Archive/Extract Here\" \"${FILE}\""
+_parse_tv_show() {
+    local file=$1
+    local filename=""
+    local dir=""
+    local name_no_ext=""
+    local ext=""
 
-                ;;
-            "Film")
-                _display_info_box "FOLDER: I guess Film"
-                rm "$FILE"/*.nfo
-                rm "$FILE"/*.jpg
-                rm "$FILE"/*.txt
-                rm -rf "$FILE"/[Ss]creens
-                for FILE_IN_FOLDER in "$FILE"/*; do
-                    clean_up_file "$FILE_IN_FOLDER"
-                done
-                rename_film_file "$FILE"
-                ;;
-            *)
-                _display_info_box "Could not determine whether file is TV Show or Film"
-                ;;
-        esac
+    filename=$(basename -- "$file")
+    dir=$(dirname -- "$file")
+
+    if [[ -d "$file" ]]; then
+        name_no_ext="$filename"
+        ext=""
     else
-        echo "[$FILE] is not a file"
+        name_no_ext="${filename%.*}"
+        ext="${filename##*.}"
+        [[ "$filename" != *.* ]] && ext=""
     fi
-done
+
+    local show_name=""
+    local episode_str=""
+
+    if [[ "$name_no_ext" =~ (.*)[Ss]([0-9]{1,2})[Ee]([0-9]{1,2})(-?[Ee]?[0-9]{1,2})?(.*) ]]; then
+        show_name="${BASH_REMATCH[1]}"
+        local s="${BASH_REMATCH[2]}"
+        local e="${BASH_REMATCH[3]}"
+        local extra="${BASH_REMATCH[4]}"
+        printf -v episode_str "S%02dE%02d" "$((10#$s))" "$((10#$e))"
+        if [[ -n "$extra" ]]; then
+            extra=$(tr '[:lower:]' '[:upper:]' <<<"$extra")
+            if [[ "$extra" =~ ^-([0-9]+)$ ]]; then
+                printf -v episode_str "%s-E%02d" "$episode_str" "$((10#${BASH_REMATCH[1]}))"
+            elif [[ "$extra" =~ ^E([0-9]+)$ ]]; then
+                printf -v episode_str "%sE%02d" "$episode_str" "$((10#${BASH_REMATCH[1]}))"
+            elif [[ "$extra" =~ ^-E([0-9]+)$ ]]; then
+                printf -v episode_str "%s-E%02d" "$episode_str" "$((10#${BASH_REMATCH[1]}))"
+            fi
+        fi
+    elif [[ "$name_no_ext" =~ (.*)[^0-9]([0-9]{1,2})x([0-9]{1,2})(.*) ]]; then
+        show_name="${BASH_REMATCH[1]}"
+        local s="${BASH_REMATCH[2]}"
+        local e="${BASH_REMATCH[3]}"
+        printf -v episode_str "S%02dE%02d" "$((10#$s))" "$((10#$e))"
+    else
+        return 1
+    fi
+
+    show_name=$(_strip_junk_tags "$show_name")
+    show_name=$(_title_case "$show_name")
+
+    if [[ -n "$show_name" ]]; then
+        if [[ -n "$ext" ]]; then
+            printf "%s/%s %s.%s" "$dir" "$show_name" "$episode_str" "${ext,,}"
+        else
+            printf "%s/%s %s" "$dir" "$show_name" "$episode_str"
+        fi
+        return 0
+    fi
+    return 1
+}
+
+_parse_movie() {
+    local file=$1
+    local filename=""
+    local dir=""
+    local name_no_ext=""
+    local ext=""
+
+    filename=$(basename -- "$file")
+    dir=$(dirname -- "$file")
+
+    if [[ -d "$file" ]]; then
+        name_no_ext="$filename"
+        ext=""
+    else
+        name_no_ext="${filename%.*}"
+        ext="${filename##*.}"
+        [[ "$filename" != *.* ]] && ext=""
+    fi
+
+    local movie_name=""
+    local year=""
+
+    if [[ "$name_no_ext" =~ (.*)[\.\_\ \(\[]?(19[0-9]{2}|20[0-9]{2})[\.\_\ \)\}]?(.*) ]]; then
+        movie_name="${BASH_REMATCH[1]}"
+        year="${BASH_REMATCH[2]}"
+    else
+        return 1
+    fi
+
+    movie_name=$(_strip_junk_tags "$movie_name")
+    movie_name=$(_title_case "$movie_name")
+
+    if [[ -n "$movie_name" ]]; then
+        if [[ -n "$ext" ]]; then
+            printf "%s/%s (%s).%s" "$dir" "$movie_name" "$year" "${ext,,}"
+        else
+            printf "%s/%s (%s)" "$dir" "$movie_name" "$year"
+        fi
+        return 0
+    fi
+    return 1
+}
+
+_clean_directory() {
+    local dir_path=$1
+
+    # Remove metadata junk files safely
+    rm -f "$dir_path"/*.nfo "$dir_path"/*.txt "$dir_path"/*.jpg "$dir_path"/*.png 2>/dev/null
+    rm -rf "$dir_path"/[Ss]creens "$dir_path"/[Ss]creenshots 2>/dev/null
+
+    # Extract archives if present inside directory
+    shopt -s nullglob
+    local archives=("$dir_path"/*.rar "$dir_path"/*.zip "$dir_path"/*.7z "$dir_path"/*.tar.gz)
+    shopt -u nullglob
+
+    if ((${#archives[@]} > 0)); then
+        local extract_script="${ROOT_DIR}/Archive/Extract here"
+        if [[ -f "$extract_script" ]]; then
+            for arch in "${archives[@]}"; do
+                bash "$extract_script" "$arch" 2>/dev/null
+            done
+        fi
+    fi
+
+    # Process media files inside directory
+    shopt -s nullglob
+    local media_files=("$dir_path"/*.mkv "$dir_path"/*.mp4 "$dir_path"/*.avi "$dir_path"/*.mov "$dir_path"/*.wmv "$dir_path"/*.m4v "$dir_path"/*.flv "$dir_path"/*.ts)
+    shopt -u nullglob
+
+    for media in "${media_files[@]}"; do
+        _clean_up_item "$media"
+    done
+
+    # Rename directory itself if it matches a movie pattern
+    local new_dir_path=""
+    if new_dir_path=$(_parse_movie "$dir_path"); then
+        _move_file "skip" "$dir_path" "$new_dir_path"
+    fi
+}
+
+_clean_up_item() {
+    local item=$1
+
+    if [[ -d "$item" ]]; then
+        _clean_directory "$item"
+    elif [[ -f "$item" ]]; then
+        local new_path=""
+        if new_path=$(_parse_tv_show "$item"); then
+            _move_file "skip" "$item" "$new_path"
+        elif new_path=$(_parse_movie "$item"); then
+            _move_file "skip" "$item" "$new_path"
+        fi
+    fi
+}
+
+_main_task() {
+    local input_file=$1
+    local output_dir=$2
+
+    _clean_up_item "$input_file"
+}
+
+_main "$@"
