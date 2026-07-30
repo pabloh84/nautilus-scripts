@@ -41,14 +41,27 @@ _title_case() {
 
 _strip_junk_tags() {
     local text=$1
+    # Strip any bracketed block like [Rip], [5.1 Castellano], [1080p], [Dual], etc.
+    text=$(sed -E 's/\[[^]]*\]//g' <<<"$text")
+    # Replace dots and underscores with spaces
     text=$(sed -E 's/[\._]/ /g' <<<"$text")
+    # Strip resolution indicators
     text=$(sed -E 's/\b(1080p?|720p?|2160p?|4k|uhd|480p?|576p?|1080i)\b//gI' <<<"$text")
+    # Strip codecs & formats
     text=$(sed -E 's/\b(x264|x265|h264|h265|hevc|avc|xvid|divx|10bit|8bit|hdr10\+?|hdr|dv|dovi)\b//gI' <<<"$text")
-    text=$(sed -E 's/\b(web-?dl|web-?rip|web|bluray|bdrip|brrip|hdtv|dvdrip|remux)\b//gI' <<<"$text")
-    text=$(sed -E 's/\b(aac|dts(-?hd)?|truehd|atmos|dd5\.?1|ac3|5\.1|7\.1|flac|mp3)\b//gI' <<<"$text")
-    text=$(sed -E 's/\b(proper|repack|extended|uncut|directors\.?cut|multi|subbed|dubbed)\b//gI' <<<"$text")
+    # Strip sources & rip tags
+    text=$(sed -E 's/\b(web-?dl|web-?rip|web|bluray|bdrip|brrip|hdtv|dvdrip|remux|rip|microhd)\b//gI' <<<"$text")
+    # Strip audio tags
+    text=$(sed -E 's/\b(aac|dts(-?hd)?|truehd|atmos|dd5\.?1|ac3|5\.1|7\.1|5 1|7 1|flac|mp3)\b//gI' <<<"$text")
+    # Strip languages & audio/sub tags
+    text=$(sed -E 's/\b(castellano|spanish|español|latino|english|eng|esp|dual|multi|subbed|dubbed|subs?)\b//gI' <<<"$text")
+    # Strip release details & revisions
+    text=$(sed -E 's/\b(proper|repack|extended|uncut|directors\.?cut)\b//gI' <<<"$text")
+    # Strip trailing release group indicators (e.g. -GROUP or -RARBG)
     text=$(sed -E 's/ - [A-Za-z0-9]+$//g; s/-[A-Za-z0-9]+$//g' <<<"$text")
-    text=$(sed -E 's/ +/ /g; s/^ +| +$//g' <<<"$text")
+    # Clean up leading/trailing punctuation and parens/brackets/dashes
+    text=$(sed -E 's/[ \(\[\-\._]+$//g; s/^[ \(\[\-\._]+//g' <<<"$text")
+    text=$(sed -E 's/ +/ /g' <<<"$text")
     printf "%s" "$text"
 }
 
@@ -159,8 +172,8 @@ _parse_movie() {
 _clean_directory() {
     local dir_path=$1
 
-    # Remove metadata junk files safely
-    rm -f "$dir_path"/*.nfo "$dir_path"/*.txt "$dir_path"/*.jpg "$dir_path"/*.png 2>/dev/null
+    # Remove metadata junk files safely (.nfo, .txt, .jpg, .png, .url)
+    rm -f "$dir_path"/*.nfo "$dir_path"/*.txt "$dir_path"/*.jpg "$dir_path"/*.png "$dir_path"/*.url "$dir_path"/*.URL 2>/dev/null
     rm -rf "$dir_path"/[Ss]creens "$dir_path"/[Ss]creenshots 2>/dev/null
 
     # Extract archives if present inside directory
