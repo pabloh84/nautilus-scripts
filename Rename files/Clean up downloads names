@@ -15,18 +15,406 @@ _main() {
     _display_wait_box
     input_files=$(_get_files "par_type=all")
 
+    if [[ -z "$input_files" ]]; then
+        _close_wait_box
+        return 0
+    fi
+
+    _generate_plan "$input_files"
+    local changes_count=$?
+
+    _close_wait_box
+
+    if ((changes_count == 0)); then
+        _display_info_box "$(_i18n 'No files need cleaning or renaming.')"
+        return 0
+    fi
+
+    if ! _display_plan_box; then
+        return 0
+    fi
+
+    _display_wait_box
+
     # Export functions for parallel execution worker processes.
     export -f _main_task \
         _clean_up_item \
-        _clean_directory \
+        _clean_up_single_media \
+        _resolve_media_target \
+        _detect_sub_lang \
         _parse_tv_show \
         _parse_movie \
+        _find_local_movie_year \
+        _get_online_movie_year \
         _strip_junk_tags \
         _title_case
 
     # Execute the function '_main_task' for each item in parallel.
     _run_task_parallel "$input_files" "$output_dir"
     _display_result_box ""
+}
+
+_display_plan_box() {
+    local btn_ok=""
+    btn_ok="$(_i18n 'Apply Plan')"
+    local btn_cancel=""
+    btn_cancel="$(_i18n 'Cancel')"
+
+    _display_lock
+    if ! _is_gui_session; then
+        cat "$TEMP_DATA_TEXT_BOX" >&2
+        echo -e -n "\nApply this plan? [Y/n] " >&2
+        local response=""
+        read -r response </dev/tty
+        [[ ${response,,} == *"n"* ]] && { _display_unlock; return 1; }
+    elif _command_exists "zenity"; then
+        zenity --title "$(_get_script_name) - Proposed Plan" \
+            --no-markup --width="$GUI_BOX_WIDTH" --height="$GUI_BOX_HEIGHT" \
+            --cancel-label="${btn_cancel}" --ok-label="${btn_ok}" \
+            --text-info --no-wrap \
+            --filename="$TEMP_DATA_TEXT_BOX" &>/dev/null || { _display_unlock; return 1; }
+    elif _command_exists "yad"; then
+        yad --title "$(_get_script_name) - Proposed Plan" --center \
+            --no-markup --width="$GUI_BOX_WIDTH" --height="$GUI_BOX_HEIGHT" \
+            --button="${btn_cancel}:1" --button="${btn_ok}:0" \
+            --text-info --no-wrap \
+            --filename="$TEMP_DATA_TEXT_BOX" &>/dev/null || { _display_unlock; return 1; }
+    elif _command_exists "xmessage"; then
+        xmessage -title "$(_get_script_name) - Proposed Plan" \
+            -buttons "${btn_cancel}:1,${btn_ok}:0" \
+            -file "$TEMP_DATA_TEXT_BOX" &>/dev/null || { _display_unlock; return 1; }
+    fi
+    _display_unlock
+
+    return 0
+}
+
+_detect_sub_lang() {
+    local name=$1
+    local name_lower="${name,,}"
+    local lang=""
+    local modifier=""
+
+    if [[ "$name_lower" =~ (latino|latin|lat|\.lat\.) ]] || [[ "$name_lower" =~ \.lat\.[a-z0-9]+$ ]]; then
+        lang="lat"
+    elif [[ "$name_lower" =~ (spanish|castellano|español|esp|cas|spa|\.es\.) ]] || [[ "$name_lower" =~ \.es\.[a-z0-9]+$ ]] || [[ "$name_lower" =~ ^spa\. ]]; then
+        lang="es"
+    elif [[ "$name_lower" =~ (english|eng|\.en\.) ]] || [[ "$name_lower" =~ \.en\.[a-z0-9]+$ ]] || [[ "$name_lower" =~ ^eng\. ]]; then
+        lang="en"
+    elif [[ "$name_lower" =~ (french|francais|fre|fra|canadian|\.fr\.) ]] || [[ "$name_lower" =~ \.fr\.[a-z0-9]+$ ]]; then
+        lang="fr"
+    elif [[ "$name_lower" =~ (german|deutsch|ger|deu|\.de\.) ]] || [[ "$name_lower" =~ \.de\.[a-z0-9]+$ ]] || [[ "$name_lower" =~ ^ger\. ]]; then
+        lang="de"
+    elif [[ "$name_lower" =~ (italian|ita|\.it\.) ]] || [[ "$name_lower" =~ \.it\.[a-z0-9]+$ ]]; then
+        lang="it"
+    elif [[ "$name_lower" =~ (portuguese|por|pt|\.pt\.) ]] || [[ "$name_lower" =~ \.pt\.[a-z0-9]+$ ]]; then
+        lang="pt"
+    elif [[ "$name_lower" =~ (swedish|swe|sv|\.sv\.) ]] || [[ "$name_lower" =~ \.sv\.[a-z0-9]+$ ]] || [[ "$name_lower" =~ ^swe\. ]]; then
+        lang="sv"
+    fi
+
+    if [[ "$name_lower" =~ forced ]]; then
+        modifier=".forced"
+    elif [[ "$name_lower" =~ sdh ]]; then
+        modifier=".sdh"
+    elif [[ "$name_lower" =~ \b(hi|cc)\b ]]; then
+        modifier=".hi"
+    fi
+
+    if [[ -n "$lang" ]]; then
+        printf "%s.%s" "$modifier" "$lang"
+    elif [[ -n "$modifier" ]]; then
+        printf "%s" "$modifier"
+    else
+        printf ""
+    fi
+}
+
+_get_online_movie_year() {
+    local title=$1
+    [[ -z "$title" ]] && return 1
+
+    python3 -c '
+import urllib.request, urllib.parse, json, sys
+
+title = sys.argv[1]
+try:
+    clean_q = title.lower().replace(" ", "_")
+    if clean_q:
+        first_char = clean_q[0]
+        url = f"https://v2.sg.media-imdb.com/suggestion/{first_char}/{urllib.parse.quote(clean_q)}.json"
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=2) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            if data.get("d"):
+                for item in data["d"]:
+                    if item.get("y"):
+                        print(item["y"])
+                        sys.exit(0)
+except Exception:
+    pass
+' "$title" 2>/dev/null
+}
+
+_find_local_movie_year() {
+    local file=$1
+    local curr_dir=$(dirname -- "$file")
+
+    while [[ -n "$curr_dir" ]] && [[ "$curr_dir" != "/" ]]; do
+        local dir_name=$(basename -- "$curr_dir")
+        if [[ "$dir_name" =~ (19[0-9]{2}|20[0-9]{2}) ]]; then
+            echo "${BASH_REMATCH[1]}"
+            return 0
+        fi
+        curr_dir=$(dirname -- "$curr_dir")
+    done
+
+    local file_dir=$(dirname -- "$file")
+    if [[ -d "$file_dir" ]]; then
+        local nfo_file=""
+        nfo_file=$(find "$file_dir" -maxdepth 2 -type f \( -iname "*.nfo" -o -iname "*.txt" \) 2>/dev/null | head -n 1)
+        if [[ -n "$nfo_file" ]]; then
+            local year_match=$(grep -oE "\b(19[0-9]{2}|20[0-9]{2})\b" "$nfo_file" 2>/dev/null | head -n 1)
+            if [[ -n "$year_match" ]]; then
+                echo "$year_match"
+                return 0
+            fi
+        fi
+    fi
+
+    return 1
+}
+
+_resolve_media_target() {
+    local media_file=$1
+    local base_dir=$2
+    local filename=$(basename -- "$media_file")
+    local filename_lower="${filename,,}"
+    local ext="${filename_lower##*.}"
+
+    # Ignore / delete sample clips
+    if [[ "$filename_lower" =~ sample ]] && [[ "$ext" =~ ^(mkv|mp4|avi|mov|wmv)$ ]]; then
+        echo "DELETE_SAMPLE:1"
+        return 0
+    fi
+
+    # FOR SUBTITLE FILES: Check if file explicitly contains movie/show name or climb tree
+    if [[ "$ext" =~ ^(srt|ass|vtt|sub|idx)$ ]]; then
+        local parsed_output=""
+        local target_dir=""
+        local target_file=""
+
+        # 1. Check if subtitle filename explicitly contains a TV show SXXEXX code
+        if parsed_output=$(_parse_tv_show "$media_file" "$base_dir"); then
+            echo "$parsed_output"
+            return 0
+        fi
+
+        # 2. Check if subtitle filename explicitly contains a Movie WITH A YEAR (e.g. Knights.Of.The.Zodiac.2023...srt)
+        local name_no_ext="${filename%.*}"
+        if [[ "$name_no_ext" =~ (19[0-9]{2}|20[0-9]{2}) ]]; then
+            if parsed_output=$(_parse_movie "$media_file" "$base_dir"); then
+                echo "$parsed_output"
+                return 0
+            fi
+        fi
+
+        # 3. Subtitle file is generic or a descriptor (Forced.eng.srt, SDH.eng.srt, ger.srt, spa.srt, etc.)
+        # Climb up parent directories to find enclosing video file or release directory
+        local curr_dir=$(dirname -- "$media_file")
+        while [[ -n "$curr_dir" ]] && [[ "$curr_dir" != "/" ]]; do
+            # a) Check if there is any video file in curr_dir (or subdirectories)
+            local video_file=""
+            video_file=$(find "$curr_dir" -maxdepth 2 -type f \( -iname "*.mkv" -o -iname "*.mp4" -o -iname "*.avi" -o -iname "*.mov" -o -iname "*.wmv" \) -not -iname "*sample*" 2>/dev/null | head -n 1)
+
+            if [[ -n "$video_file" ]]; then
+                if parsed_output=$(_parse_tv_show "$video_file" "$base_dir"); then
+                    target_dir=$(grep "^TARGET_DIR:" <<<"$parsed_output" | cut -d: -f2-)
+                    target_file=$(grep "^TARGET_FILE:" <<<"$parsed_output" | cut -d: -f2-)
+                    local lang_suffix=$(_detect_sub_lang "$filename")
+                    echo "TARGET_DIR:$target_dir"
+                    echo "TARGET_FILE:${target_file%.*}$lang_suffix.$ext"
+                    return 0
+                fi
+                if parsed_output=$(_parse_movie "$video_file" "$base_dir"); then
+                    target_dir=$(grep "^TARGET_DIR:" <<<"$parsed_output" | cut -d: -f2-)
+                    target_file=$(grep "^TARGET_FILE:" <<<"$parsed_output" | cut -d: -f2-)
+                    local lang_suffix=$(_detect_sub_lang "$filename")
+                    echo "TARGET_DIR:$target_dir"
+                    echo "TARGET_FILE:${target_file%.*}$lang_suffix.$ext"
+                    return 0
+                fi
+            fi
+
+            # b) Check if curr_dir folder name itself parses as TV show or Movie (with year or valid title)
+            local dir_name=$(basename -- "$curr_dir")
+            local clean_dir_name=$(_strip_junk_tags "$dir_name")
+            if [[ -n "$clean_dir_name" ]] && [[ "${clean_dir_name,,}" != "subs" ]] && [[ "${clean_dir_name,,}" != "subtitles" ]]; then
+                if parsed_output=$(_parse_tv_show "$curr_dir" "$base_dir"); then
+                    target_dir=$(grep "^TARGET_DIR:" <<<"$parsed_output" | cut -d: -f2-)
+                    target_file=$(grep "^TARGET_FILE:" <<<"$parsed_output" | cut -d: -f2-)
+                    local lang_suffix=$(_detect_sub_lang "$filename")
+                    echo "TARGET_DIR:$target_dir"
+                    echo "TARGET_FILE:${target_file%.*}$lang_suffix.$ext"
+                    return 0
+                fi
+                if [[ "$dir_name" =~ (19[0-9]{2}|20[0-9]{2}) ]]; then
+                    if parsed_output=$(_parse_movie "$curr_dir" "$base_dir"); then
+                        target_dir=$(grep "^TARGET_DIR:" <<<"$parsed_output" | cut -d: -f2-)
+                        target_file=$(grep "^TARGET_FILE:" <<<"$parsed_output" | cut -d: -f2-)
+                        local lang_suffix=$(_detect_sub_lang "$filename")
+                        echo "TARGET_DIR:$target_dir"
+                        echo "TARGET_FILE:${target_file%.*}$lang_suffix.$ext"
+                        return 0
+                    fi
+                fi
+            fi
+
+            [[ "$curr_dir" == "$base_dir" ]] && break
+            curr_dir=$(dirname -- "$curr_dir")
+        done
+
+        # Fallback if no enclosing video/movie folder could be found
+        if parsed_output=$(_parse_movie "$media_file" "$base_dir"); then
+            echo "$parsed_output"
+            return 0
+        fi
+        return 1
+    fi
+
+    # FOR VIDEO FILES: Try TV show then Movie
+    local parsed_output=""
+    if parsed_output=$(_parse_tv_show "$media_file" "$base_dir"); then
+        echo "$parsed_output"
+        return 0
+    fi
+
+    if parsed_output=$(_parse_movie "$media_file" "$base_dir"); then
+        echo "$parsed_output"
+        return 0
+    fi
+
+    return 1
+}
+
+_generate_plan() {
+    local input_files=$1
+    local moves=""
+    local deletions=""
+
+    local move_count=0
+    local del_count=0
+
+    declare -A seen_targets
+
+    while IFS= read -r item; do
+        [[ -z "$item" ]] && continue
+        [[ ! -e "$item" ]] && continue
+
+        local base_dir=""
+        if [[ -d "$item" ]]; then
+            base_dir="$item"
+        else
+            base_dir=$(dirname -- "$item")
+        fi
+
+        if [[ -d "$item" ]]; then
+            # Check junk files
+            while IFS= read -r -d '' junk; do
+                del_count=$((del_count + 1))
+                deletions+="[DELETE] $junk\n"
+            done < <(find "$item" -type f \( -iname "*.nfo" -o -iname "*.txt" -o -iname "*.jpg" -o -iname "*.png" -o -iname "*.url" \) -print0 2>/dev/null)
+
+            # Check media files
+            while IFS= read -r -d '' media; do
+                local parsed_output=""
+
+                if parsed_output=$(_resolve_media_target "$media" "$base_dir"); then
+                    if grep -q "^DELETE_SAMPLE:1" <<<"$parsed_output"; then
+                        del_count=$((del_count + 1))
+                        deletions+="[DELETE SAMPLE] $media\n"
+                        continue
+                    fi
+
+                    local target_file=$(grep "^TARGET_FILE:" <<<"$parsed_output" | cut -d: -f2-)
+                    if [[ -n "$target_file" ]]; then
+                        if [[ "$media" == "$target_file" ]]; then
+                            seen_targets["$target_file"]=1
+                        else
+                            # Disambiguate colliding targets
+                            if [[ -n "${seen_targets["$target_file"]:-}" ]]; then
+                                local count=$((seen_targets["$target_file"] + 1))
+                                seen_targets["$target_file"]=$count
+                                local base="${target_file%.*}"
+                                local ext="${target_file##*.}"
+                                target_file="${base}.${count}.${ext}"
+                            else
+                                seen_targets["$target_file"]=1
+                            fi
+
+                            if [[ "$media" != "$target_file" ]]; then
+                                move_count=$((move_count + 1))
+                                moves+="[MOVE] $media\n    -> $target_file\n\n"
+                            fi
+                        fi
+                    fi
+                fi
+            done < <(find "$item" -type f \( -iname "*.mkv" -o -iname "*.mp4" -o -iname "*.avi" -o -iname "*.mov" -o -iname "*.wmv" -o -iname "*.m4v" -o -iname "*.flv" -o -iname "*.ts" -o -iname "*.srt" -o -iname "*.ass" -o -iname "*.vtt" -o -iname "*.sub" -o -iname "*.idx" \) -print0 2>/dev/null)
+        elif [[ -f "$item" ]]; then
+            local parsed_output=""
+
+            if parsed_output=$(_resolve_media_target "$item" "$base_dir"); then
+                local target_file=$(grep "^TARGET_FILE:" <<<"$parsed_output" | cut -d: -f2-)
+                if [[ -n "$target_file" ]]; then
+                    if [[ "$item" == "$target_file" ]]; then
+                        seen_targets["$target_file"]=1
+                    else
+                        if [[ -n "${seen_targets["$target_file"]:-}" ]]; then
+                            local count=$((seen_targets["$target_file"] + 1))
+                            seen_targets["$target_file"]=$count
+                            local base="${target_file%.*}"
+                            local ext="${target_file##*.}"
+                            target_file="${base}.${count}.${ext}"
+                        else
+                            seen_targets["$target_file"]=1
+                        fi
+
+                        if [[ "$item" != "$target_file" ]]; then
+                            move_count=$((move_count + 1))
+                            moves+="[MOVE] $item\n    -> $target_file\n\n"
+                        fi
+                    fi
+                fi
+            fi
+        fi
+    done <<<"$input_files"
+
+    {
+        echo "================================================================================"
+        echo "                    CLEAN UP DOWNLOADS - PROPOSED PLAN"
+        echo "================================================================================"
+        echo ""
+        echo "SUMMARY:"
+        echo "  - Media Files to Move/Rename: $move_count"
+        echo "  - Junk Files to Delete:       $del_count"
+        echo ""
+        if [[ -n "$moves" ]]; then
+            echo "--------------------------------------------------------------------------------"
+            echo "PROPOSED MEDIA RELOCATIONS:"
+            echo "--------------------------------------------------------------------------------"
+            echo -e "$moves"
+        fi
+        if [[ -n "$deletions" ]]; then
+            echo "--------------------------------------------------------------------------------"
+            echo "PROPOSED JUNK DELETIONS:"
+            echo "--------------------------------------------------------------------------------"
+            echo -e "$deletions"
+        fi
+        echo "================================================================================"
+        echo "Press \"Apply Plan\" to proceed with these changes or \"Cancel\" to abort."
+    } > "$TEMP_DATA_TEXT_BOX"
+
+    return "$((move_count + del_count))"
 }
 
 _title_case() {
@@ -41,8 +429,14 @@ _title_case() {
 
 _strip_junk_tags() {
     local text=$1
+    # Replace newlines, carriage returns, tabs with spaces
+    text=$(tr '\r\n\t' '   ' <<<"$text")
     # Strip any bracketed block like [Rip], [5.1 Castellano], [1080p], [Dual], etc.
     text=$(sed -E 's/\[[^]]*\]//g' <<<"$text")
+    # Strip parenthetical blocks containing junk, quality, audio, resolution, language, or website terms
+    text=$(sed -E 's/\([^)]*(hdr|rip|web|dl|dvd|bd|bluray|1080|720|4k|2160|castellano|spanish|español|latino|english|eng|esp|dual|multi|torrent|com|net|org|es|me|co|io|cc|site|www)[^)]*\)//gI' <<<"$text")
+    # Strip domain names & URLs before replacing dots/underscores
+    text=$(sed -E 's/\b(www\.)?[A-Za-z0-9-]+\.(com|net|org|es|me|co|io|cc|info|biz|tv|to|mx)\b//gI' <<<"$text")
     # Replace dots and underscores with spaces
     text=$(sed -E 's/[\._]/ /g' <<<"$text")
     # Strip resolution indicators
@@ -50,48 +444,60 @@ _strip_junk_tags() {
     # Strip codecs & formats
     text=$(sed -E 's/\b(x264|x265|h264|h265|hevc|avc|xvid|divx|10bit|8bit|hdr10\+?|hdr|dv|dovi)\b//gI' <<<"$text")
     # Strip sources & rip tags
-    text=$(sed -E 's/\b(web-?dl|web-?rip|web|bluray|bdrip|brrip|hdtv|dvdrip|remux|rip|microhd)\b//gI' <<<"$text")
+    text=$(sed -E 's/\b(web-?dl|web-?rip|web-?hd|web|bluray|bd-?rip|brrip|hdtv|hdtvrip|dvd-?rip|dvd-?scr|screener|scr|hd-?rip|hd-?ts|hd-?tc|cam-?rip|cam|telecine|tc|tele-?sync|ts|vodrip|satrip|remux|rip|microhd)\b//gI' <<<"$text")
     # Strip audio tags
-    text=$(sed -E 's/\b(aac|dts(-?hd)?|truehd|atmos|dd5\.?1|ac3|5\.1|7\.1|5 1|7 1|flac|mp3)\b//gI' <<<"$text")
+    text=$(sed -E 's/\b(aac|dts(-?hd)?|truehd|atmos|dd5\.?1|ac3|5\.1|7\.1|5 1|7 1|flac|mp3|eac3)\b//gI' <<<"$text")
     # Strip languages & audio/sub tags
     text=$(sed -E 's/\b(castellano|spanish|español|latino|english|eng|esp|dual|multi|subbed|dubbed|subs?)\b//gI' <<<"$text")
     # Strip release details & revisions
     text=$(sed -E 's/\b(proper|repack|extended|uncut|directors\.?cut)\b//gI' <<<"$text")
+    # Strip common site names / release group tags
+    text=$(sed -E 's/\b(elitetorrent|divxtotal|pctreload|pctestrenos|torrentestrenos|subtorrents|newpct|descargaya|rarbg|yts|eztv|1337x|tgx)\b//gI' <<<"$text")
     # Strip trailing release group indicators (e.g. -GROUP or -RARBG)
     text=$(sed -E 's/ - [A-Za-z0-9]+$//g; s/-[A-Za-z0-9]+$//g' <<<"$text")
-    # Clean up leading/trailing punctuation and parens/brackets/dashes
-    text=$(sed -E 's/[ \(\[\-\._]+$//g; s/^[ \(\[\-\._]+//g' <<<"$text")
+    # Clean up empty parens and brackets
+    text=$(sed -E 's/\(\s*\)//g; s/\[\s*\]//g' <<<"$text")
+    # Clean up leading/trailing punctuation, parens, brackets, dashes, and dots
+    text=$(sed -E 's/[- \(\[\._]+$//g; s/^[- \(\[\._]+//g' <<<"$text")
     text=$(sed -E 's/ +/ /g' <<<"$text")
     printf "%s" "$text"
 }
 
 _parse_tv_show() {
     local file=$1
-    local filename=""
-    local dir=""
-    local name_no_ext=""
-    local ext=""
+    local base_dir=$2
+    local filename=$(basename -- "$file")
+    local name_no_ext="${filename%.*}"
+    local ext="${filename##*.}"
+    ext="${ext,,}"
+    [[ "$filename" != *.* ]] && ext=""
 
-    filename=$(basename -- "$file")
-    dir=$(dirname -- "$file")
-
-    if [[ -d "$file" ]]; then
-        name_no_ext="$filename"
-        ext=""
-    else
-        name_no_ext="${filename%.*}"
-        ext="${filename##*.}"
-        [[ "$filename" != *.* ]] && ext=""
+    local lang_suffix=""
+    if [[ "$ext" =~ ^(srt|ass|vtt|sub|idx)$ ]]; then
+        lang_suffix=$(_detect_sub_lang "$filename")
+        if [[ "$name_no_ext" =~ \.(es|en|fr|de|it|pt|sv|lat|spa|eng|cas|castellano|spanish|english|fre|fra|ger|deu|ita|por|jpn|swe|forced|sdh|hi)$ ]]; then
+            name_no_ext="${name_no_ext%.*}"
+        fi
+        if [[ "$name_no_ext" =~ \.(forced|sdh|hi|cc)$ ]]; then
+            name_no_ext="${name_no_ext%.*}"
+        fi
     fi
 
     local show_name=""
+    local s=""
+    local e=""
     local episode_str=""
+    local season_str=""
 
-    if [[ "$name_no_ext" =~ (.*)[Ss]([0-9]{1,2})[Ee]([0-9]{1,2})(-?[Ee]?[0-9]{1,2})?(.*) ]]; then
+    shopt -s nocasematch
+
+    # Pattern 1: Standard S02E04 or S2E4
+    if [[ "$name_no_ext" =~ (.*)s([0-9]{1,2})e([0-9]{1,2})(-?e?[0-9]{1,2})?(.*) ]]; then
         show_name="${BASH_REMATCH[1]}"
-        local s="${BASH_REMATCH[2]}"
-        local e="${BASH_REMATCH[3]}"
+        s="${BASH_REMATCH[2]}"
+        e="${BASH_REMATCH[3]}"
         local extra="${BASH_REMATCH[4]}"
+        printf -v season_str "S%02d" "$((10#$s))"
         printf -v episode_str "S%02dE%02d" "$((10#$s))" "$((10#$e))"
         if [[ -n "$extra" ]]; then
             extra=$(tr '[:lower:]' '[:upper:]' <<<"$extra")
@@ -103,24 +509,58 @@ _parse_tv_show() {
                 printf -v episode_str "%s-E%02d" "$episode_str" "$((10#${BASH_REMATCH[1]}))"
             fi
         fi
+    # Pattern 2: Standard 2x04 or 02x04
     elif [[ "$name_no_ext" =~ (.*)[^0-9]([0-9]{1,2})x([0-9]{1,2})(.*) ]]; then
         show_name="${BASH_REMATCH[1]}"
-        local s="${BASH_REMATCH[2]}"
-        local e="${BASH_REMATCH[3]}"
+        s="${BASH_REMATCH[2]}"
+        e="${BASH_REMATCH[3]}"
+        printf -v season_str "S%02d" "$((10#$s))"
+        printf -v episode_str "S%02dE%02d" "$((10#$s))" "$((10#$e))"
+    # Pattern 3: Spanish / International Temp.X ... Cap.Y or Cap.SEE (e.g. Temp.2 [Cap.204] or Cap.204)
+    elif [[ "$name_no_ext" =~ (.*)[\.\_\ \-\[\(](t|temp\.|temp|temporada)[\.\_\ ]?([0-9]{1,2}).*[\.\_\ \-\[\(](cap\.|cap|capitulo|capítulo|ep\.|ep|episodio)[\.\_\ ]?([0-9]{1,4}) ]] || [[ "$name_no_ext" =~ (.*)[\.\_\ \-\[\(](cap\.|cap|capitulo|capítulo)[\.\_\ ]?([0-9]{3,4}) ]]; then
+        if [[ -n "${BASH_REMATCH[5]:-}" ]]; then
+            show_name="${BASH_REMATCH[1]}"
+            s="${BASH_REMATCH[3]}"
+            local raw_e="${BASH_REMATCH[5]}"
+            if ((${#raw_e} == 3)) && [[ "$raw_e" == "$s"* ]]; then
+                e="${raw_e:1:2}"
+            elif ((${#raw_e} == 4)) && [[ "$raw_e" == "$s"* ]]; then
+                e="${raw_e:2:2}"
+            else
+                e="$raw_e"
+            fi
+        else
+            show_name="${BASH_REMATCH[1]}"
+            local raw_code="${BASH_REMATCH[3]}"
+            if ((${#raw_code} == 3)); then
+                s="${raw_code:0:1}"
+                e="${raw_code:1:2}"
+            elif ((${#raw_code} == 4)); then
+                s="${raw_code:0:2}"
+                e="${raw_code:2:2}"
+            fi
+        fi
+        printf -v season_str "S%02d" "$((10#$s))"
         printf -v episode_str "S%02dE%02d" "$((10#$s))" "$((10#$e))"
     else
+        shopt -u nocasematch
         return 1
     fi
+    shopt -u nocasematch
 
     show_name=$(_strip_junk_tags "$show_name")
     show_name=$(_title_case "$show_name")
 
     if [[ -n "$show_name" ]]; then
+        local target_dir="$base_dir/$show_name $season_str"
+        local target_file=""
         if [[ -n "$ext" ]]; then
-            printf "%s/%s %s.%s" "$dir" "$show_name" "$episode_str" "${ext,,}"
+            target_file="$target_dir/$show_name $episode_str$lang_suffix.$ext"
         else
-            printf "%s/%s %s" "$dir" "$show_name" "$episode_str"
+            target_file="$target_dir/$show_name $episode_str"
         fi
+        echo "TARGET_DIR:$target_dir"
+        echo "TARGET_FILE:$target_file"
         return 0
     fi
     return 1
@@ -128,21 +568,22 @@ _parse_tv_show() {
 
 _parse_movie() {
     local file=$1
-    local filename=""
-    local dir=""
-    local name_no_ext=""
-    local ext=""
+    local base_dir=$2
+    local filename=$(basename -- "$file")
+    local name_no_ext="${filename%.*}"
+    local ext="${filename##*.}"
+    ext="${ext,,}"
+    [[ "$filename" != *.* ]] && ext=""
 
-    filename=$(basename -- "$file")
-    dir=$(dirname -- "$file")
-
-    if [[ -d "$file" ]]; then
-        name_no_ext="$filename"
-        ext=""
-    else
-        name_no_ext="${filename%.*}"
-        ext="${filename##*.}"
-        [[ "$filename" != *.* ]] && ext=""
+    local lang_suffix=""
+    if [[ "$ext" =~ ^(srt|ass|vtt|sub|idx)$ ]]; then
+        lang_suffix=$(_detect_sub_lang "$filename")
+        if [[ "$name_no_ext" =~ \.(es|en|fr|de|it|pt|sv|lat|spa|eng|cas|castellano|spanish|english|fre|fra|ger|deu|ita|por|jpn|swe|forced|sdh|hi)$ ]]; then
+            name_no_ext="${name_no_ext%.*}"
+        fi
+        if [[ "$name_no_ext" =~ \.(forced|sdh|hi|cc)$ ]]; then
+            name_no_ext="${name_no_ext%.*}"
+        fi
     fi
 
     local movie_name=""
@@ -152,72 +593,124 @@ _parse_movie() {
         movie_name="${BASH_REMATCH[1]}"
         year="${BASH_REMATCH[2]}"
     else
-        return 1
+        movie_name="$name_no_ext"
+        year=""
     fi
 
     movie_name=$(_strip_junk_tags "$movie_name")
     movie_name=$(_title_case "$movie_name")
 
-    if [[ -n "$movie_name" ]]; then
-        if [[ -n "$ext" ]]; then
-            printf "%s/%s (%s).%s" "$dir" "$movie_name" "$year" "${ext,,}"
-        else
-            printf "%s/%s (%s)" "$dir" "$movie_name" "$year"
+    if [[ -z "$year" ]] && [[ -n "$movie_name" ]]; then
+        year=$(_find_local_movie_year "$file")
+        if [[ -z "$year" ]]; then
+            year=$(_get_online_movie_year "$movie_name")
         fi
+    fi
+
+    if [[ -n "$movie_name" ]]; then
+        local target_dir=""
+        local target_file=""
+        if [[ -n "$year" ]]; then
+            target_dir="$base_dir/$movie_name ($year)"
+            if [[ -n "$ext" ]]; then
+                target_file="$target_dir/$movie_name ($year)$lang_suffix.$ext"
+            else
+                target_file="$target_dir/$movie_name ($year)"
+            fi
+        else
+            target_dir="$base_dir/$movie_name"
+            if [[ -n "$ext" ]]; then
+                target_file="$target_dir/$movie_name$lang_suffix.$ext"
+            else
+                target_file="$target_dir/$movie_name"
+            fi
+        fi
+        echo "TARGET_DIR:$target_dir"
+        echo "TARGET_FILE:$target_file"
         return 0
     fi
     return 1
 }
 
-_clean_directory() {
-    local dir_path=$1
+_clean_up_single_media() {
+    local media_file=$1
+    local base_dir=$2
+    local container_dir=$3
 
-    # Remove metadata junk files safely (.nfo, .txt, .jpg, .png, .url)
-    rm -f "$dir_path"/*.nfo "$dir_path"/*.txt "$dir_path"/*.jpg "$dir_path"/*.png "$dir_path"/*.url "$dir_path"/*.URL 2>/dev/null
-    rm -rf "$dir_path"/[Ss]creens "$dir_path"/[Ss]creenshots 2>/dev/null
+    local filename=$(basename -- "$media_file")
+    local filename_lower="${filename,,}"
 
-    # Extract archives if present inside directory
-    shopt -s nullglob
-    local archives=("$dir_path"/*.rar "$dir_path"/*.zip "$dir_path"/*.7z "$dir_path"/*.tar.gz)
-    shopt -u nullglob
-
-    if ((${#archives[@]} > 0)); then
-        local extract_script="${ROOT_DIR}/Archive/Extract here"
-        if [[ -f "$extract_script" ]]; then
-            for arch in "${archives[@]}"; do
-                bash "$extract_script" "$arch" 2>/dev/null
-            done
-        fi
+    # Delete sample video clips
+    if [[ "$filename_lower" =~ sample ]] && [[ "${filename_lower##*.}" =~ ^(mkv|mp4|avi|mov|wmv)$ ]]; then
+        rm -f "$media_file"
+        return 0
     fi
 
-    # Process media files inside directory
-    shopt -s nullglob
-    local media_files=("$dir_path"/*.mkv "$dir_path"/*.mp4 "$dir_path"/*.avi "$dir_path"/*.mov "$dir_path"/*.wmv "$dir_path"/*.m4v "$dir_path"/*.flv "$dir_path"/*.ts)
-    shopt -u nullglob
+    local parsed_output=""
+    if parsed_output=$(_resolve_media_target "$media_file" "$base_dir"); then
+        if grep -q "^DELETE_SAMPLE:1" <<<"$parsed_output"; then
+            rm -f "$media_file"
+            return 0
+        fi
 
-    for media in "${media_files[@]}"; do
-        _clean_up_item "$media"
-    done
+        local target_dir=$(grep "^TARGET_DIR:" <<<"$parsed_output" | cut -d: -f2-)
+        local target_file=$(grep "^TARGET_FILE:" <<<"$parsed_output" | cut -d: -f2-)
 
-    # Rename directory itself if it matches a movie pattern
-    local new_dir_path=""
-    if new_dir_path=$(_parse_movie "$dir_path"); then
-        _move_file "skip" "$dir_path" "$new_dir_path"
+        if [[ -n "$target_dir" ]] && [[ -n "$target_file" ]] && [[ "$media_file" != "$target_file" ]]; then
+            mkdir -p "$target_dir"
+            _move_file "skip" "$media_file" "$target_file"
+        fi
     fi
 }
 
 _clean_up_item() {
     local item=$1
 
+    if [[ ! -e "$item" ]]; then
+        return 0
+    fi
+
+    local base_dir=""
     if [[ -d "$item" ]]; then
-        _clean_directory "$item"
-    elif [[ -f "$item" ]]; then
-        local new_path=""
-        if new_path=$(_parse_tv_show "$item"); then
-            _move_file "skip" "$item" "$new_path"
-        elif new_path=$(_parse_movie "$item"); then
-            _move_file "skip" "$item" "$new_path"
+        base_dir="$item"
+    else
+        base_dir=$(dirname -- "$item")
+    fi
+
+    if [[ -d "$item" ]]; then
+        # Remove metadata junk files safely
+        find "$item" -type f \( -iname "*.nfo" -o -iname "*.txt" -o -iname "*.jpg" -o -iname "*.png" -o -iname "*.url" \) -delete 2>/dev/null
+        find "$item" -type d \( -iname "screens" -o -iname "screenshots" -o -iname "sample" -o -iname "samples" \) -exec rm -rf {} + 2>/dev/null
+
+        # Extract archives if present inside directory
+        shopt -s nullglob
+        local archives=("$item"/*.rar "$item"/*.zip "$item"/*.7z "$item"/*.tar.gz)
+        shopt -u nullglob
+
+        if ((${#archives[@]} > 0)); then
+            local extract_script="${ROOT_DIR}/Archive/Extract here"
+            if [[ -f "$extract_script" ]]; then
+                for arch in "${archives[@]}"; do
+                    bash "$extract_script" "$arch" 2>/dev/null
+                done
+            fi
         fi
+
+        # Find and process all media files recursively
+        local media_files=()
+        while IFS= read -r -d '' media; do
+            media_files+=("$media")
+        done < <(find "$item" -type f \( -iname "*.mkv" -o -iname "*.mp4" -o -iname "*.avi" -o -iname "*.mov" -o -iname "*.wmv" -o -iname "*.m4v" -o -iname "*.flv" -o -iname "*.ts" -o -iname "*.srt" -o -iname "*.ass" -o -iname "*.vtt" -o -iname "*.sub" -o -iname "*.idx" \) -print0)
+
+        for media in "${media_files[@]}"; do
+            _clean_up_single_media "$media" "$base_dir" "$item"
+        done
+
+        # Remove empty subdirectories left behind
+        find "$item" -depth -mindepth 1 -type d -empty -delete 2>/dev/null
+        rmdir "$item" 2>/dev/null
+    elif [[ -f "$item" ]]; then
+        _clean_up_single_media "$item" "$base_dir" ""
     fi
 }
 
