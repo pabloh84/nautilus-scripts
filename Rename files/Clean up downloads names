@@ -44,8 +44,14 @@ _main() {
         _detect_sub_lang \
         _parse_tv_show \
         _parse_movie \
+        _parse_audiobook \
+        _clean_artist \
+        _sanitize_special_chars \
+        _get_audio_metadata \
+        _get_online_book_metadata \
         _find_local_movie_year \
         _get_online_movie_year \
+        _update_or_create_m3u \
         _strip_junk_tags \
         _title_case
 
@@ -89,6 +95,20 @@ _display_plan_box() {
     return 0
 }
 
+_sanitize_special_chars() {
+    local text=$1
+    text=$(echo "$text" | sed "s/\*/-/g; s/:/ -/g; s/[ ¿?¡!\"'\`]//g")
+    text=$(sed -E "s/ +/ /g; s/^ +//g; s/ +$//g" <<<"$text")
+    printf "%s" "$text"
+}
+
+_clean_artist() {
+    local artist=$1
+    artist=$(sed -E "s/[,/].*//g" <<<"$artist")
+    artist=$(_sanitize_special_chars "$artist")
+    printf "%s" "$artist"
+}
+
 _detect_sub_lang() {
     local name=$1
     local name_lower="${name,,}"
@@ -128,6 +148,276 @@ _detect_sub_lang() {
     else
         printf ""
     fi
+}
+
+_get_audio_metadata() {
+    local file=$1
+    if _command_exists "ffprobe"; then
+        ffprobe -v quiet -print_format json -show_format "$file" 2>/dev/null | python3 -c '
+import json, sys
+try:
+    data = json.load(sys.stdin)
+    tags = data.get("format", {}).get("tags", {})
+    artist = tags.get("artist") or tags.get("album_artist") or ""
+    album = tags.get("album") or ""
+    title = tags.get("title") or ""
+    print(f"ARTIST:{artist}")
+    print(f"ALBUM:{album}")
+    print(f"TITLE:{title}")
+except Exception:
+    pass
+' 2>/dev/null
+    fi
+}
+
+_get_online_book_metadata() {
+    local query=$1
+    [[ -z "$query" ]] && return 1
+
+    python3 -c '
+import urllib.request, urllib.parse, json, sys, re
+
+q = sys.argv[1]
+
+# Try iTunes Search API for audiobooks & series info first
+try:
+    url = f"https://itunes.apple.com/search?term={urllib.parse.quote(q)}&entity=audiobook&limit=3"
+    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+    with urllib.request.urlopen(req, timeout=2) as resp:
+        data = json.loads(resp.read().decode("utf-8"))
+        for item in data.get("results", []):
+            name = item.get("collectionName") or item.get("trackName") or ""
+            artist = item.get("artistName", "")
+            desc = item.get("description", "")
+
+            m_name = re.search(r"^(.*?)\s*\((.*?)\s*([0-9]{1,3})\)$", name)
+            if m_name:
+                print(f"AUTHOR:{artist}")
+                print(f"TITLE:{m_name.group(1).strip()}")
+                print(f"SAGA_NAME:{m_name.group(2).strip()}")
+                print(f"SAGA_NUM:{m_name.group(3).strip()}")
+                sys.exit(0)
+
+            m_desc = re.search(r"(?:book|libro|volumen|volume|vol\.?|#)\s*([0-9]{1,3})", desc, re.I)
+            m_ordinal = re.search(r"\b(primera|segunda|tercera|cuarta|quinta|sexta|séptima|septima|octava|novena|décima|decima)\s+(?:entrega|novela|libro)\b", desc, re.I)
+            ordinal_map = {"primera": "1", "segunda": "2", "tercera": "3", "cuarta": "4", "quinta": "5", "sexta": "6", "séptima": "7", "septima": "7", "octava": "8", "novena": "9", "décima": "10", "decima": "10"}
+            num = ""
+            if m_desc:
+                num = m_desc.group(1)
+            elif m_ordinal:
+                num = ordinal_map.get(m_ordinal.group(1).lower(), "")
+
+            if num:
+                print(f"AUTHOR:{artist}")
+                print(f"TITLE:{name}")
+                print(f"SAGA_NUM:{num}")
+                sys.exit(0)
+except Exception:
+    pass
+
+# Fallback to Google Books API
+try:
+    url = f"https://www.googleapis.com/books/v1/volumes?q={urllib.parse.quote(q)}&maxResults=1"
+    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+    with urllib.request.urlopen(req, timeout=2) as resp:
+        data = json.loads(resp.read().decode("utf-8"))
+        if data.get("items"):
+            info = data["items"][0].get("volumeInfo", {})
+            authors = info.get("authors", [])
+            author = authors[0] if authors else ""
+            title = info.get("title", "")
+            print(f"AUTHOR:{author}")
+            print(f"TITLE:{title}")
+            sys.exit(0)
+except Exception:
+    pass
+' "$query" 2>/dev/null
+}
+
+_parse_audiobook() {
+    local file=$1
+    local base_dir=$2
+    local filename=$(basename -- "$file")
+    local ext="${filename##*.}"
+    ext="${ext,,}"
+    [[ "$filename" != *.* ]] && ext=""
+
+    # 1. Parent directory tree inspection for generic saga hint
+    local parent_dir_hint=""
+    local curr_dir=$(dirname -- "$file")
+    while [[ -n "$curr_dir" ]] && [[ "$curr_dir" != "/" ]]; do
+        local d_name=$(basename -- "$curr_dir")
+        if [[ "${d_name,,}" =~ (expans|the expanse) ]]; then
+            parent_dir_hint="The Expanse"
+        elif [[ "$d_name" =~ ^(.*)\ ([0-9]{1,3})$ ]]; then
+            parent_dir_hint="${BASH_REMATCH[1]}"
+        fi
+        [[ "$curr_dir" == "$base_dir" ]] && break
+        curr_dir=$(dirname -- "$curr_dir")
+    done
+
+    # 2. Check ID3 audio metadata
+    local meta=""
+    local meta_artist="" meta_album="" meta_title=""
+    meta=$(_get_audio_metadata "$file")
+    if [[ -n "$meta" ]]; then
+        meta_artist=$(grep "^ARTIST:" <<<"$meta" | cut -d: -f2-)
+        meta_album=$(grep "^ALBUM:" <<<"$meta" | cut -d: -f2-)
+        meta_title=$(grep "^TITLE:" <<<"$meta" | cut -d: -f2-)
+    fi
+
+    # 3. Fully generic Python parser with iTunes & Google Books fallback
+    python3 - "$filename" "$base_dir" "$ext" "$meta_artist" "$meta_album" "$meta_title" "$parent_dir_hint" << 'EOF_PYTHON'
+import json, re, sys, urllib.request, urllib.parse
+
+filename = sys.argv[1]
+base_dir = sys.argv[2]
+ext = sys.argv[3]
+meta_artist = sys.argv[4]
+meta_album = sys.argv[5]
+meta_title = sys.argv[6]
+parent_hint = sys.argv[7]
+
+def sanitize(text):
+    if not text:
+        return ""
+    text = re.sub(r"\*", "-", text)
+    text = re.sub(r":", " -", text)
+    text = re.sub(r"[ ¿?¡!\"'\`]", "", text)
+    text = re.sub(r"\s+", " ", text).strip(" -_.")
+    return text
+
+def title_case(text):
+    return " ".join(w.capitalize() for w in text.split())
+
+def strip_author_words(text_str, author_str):
+    if not author_str:
+        return text_str
+    words = [re.escape(w) for w in re.sub(r"[\._]", " ", author_str).split() if len(w) > 0]
+    if words:
+        pattern = r"\b" + r"[\._\s]*".join(words) + r"\b"
+        text_str = re.sub(pattern, "", text_str, flags=re.I)
+    return text_str
+
+def parse_text_tokens(text_str, parent_saga):
+    text_str = re.sub(r"\s+", " ", text_str).strip(" -_")
+    saga_n, saga_i, b_title = "", "", text_str
+
+    if parent_saga:
+        saga_n = parent_saga
+
+    m_num = re.search(r"\b([0-9]{1,3})\b", text_str)
+    if m_num:
+        num = m_num.group(1)
+        start, end = m_num.span(1)
+        before = text_str[:start].strip(" -_")
+        after = text_str[end:].strip(" -_")
+
+        if before and after:
+            if len(before.split()) <= 3 and "-" not in before:
+                saga_n, saga_i, b_title = before, num, after
+            elif len(after.split()) <= 3 and "-" not in after:
+                b_title, saga_n, saga_i = before, after, num
+            else:
+                b_title, saga_n, saga_i = before, after, num
+        elif before and not after:
+            words = before.split()
+            if len(words) >= 3:
+                saga_n = " ".join(words[-2:])
+                b_title = " ".join(words[:-2])
+                saga_i = num
+            else:
+                b_title = before
+                saga_i = num
+        elif after and not before:
+            b_title = after
+            saga_i = num
+
+    return saga_n, saga_i, b_title
+
+name_no_ext = re.sub(r"\.[a-z0-9]+$", "", filename, flags=re.I)
+text = name_no_ext.replace("_", " ")
+
+author = meta_artist.split(",")[0].split("/")[0].strip() if meta_artist else ""
+
+if author:
+    text = strip_author_words(text, author)
+
+saga_name, saga_num, book_title = parse_text_tokens(text, parent_hint)
+
+# Generic iTunes / Google Books API search for missing author or missing saga_num
+if not author or not saga_num:
+    try:
+        q = f"{book_title or name_no_ext} {author}".strip()
+        url = f"https://itunes.apple.com/search?term={urllib.parse.quote(q)}&entity=audiobook&limit=3"
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=2) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            for item in data.get("results", []):
+                name = item.get("collectionName") or item.get("trackName") or ""
+                artist = item.get("artistName", "")
+                desc = item.get("description", "")
+
+                if not author and artist:
+                    author = artist
+                    text = strip_author_words(text, author)
+                    saga_name, saga_num, book_title = parse_text_tokens(text, parent_hint)
+
+                m_name = re.search(r"^(.*?)\s*\((.*?)\s*([0-9]{1,3})\)$", name)
+                if m_name:
+                    if not saga_name:
+                        saga_name = m_name.group(2).strip()
+                    if not saga_num:
+                        saga_num = m_name.group(3).strip()
+                    break
+
+                m_desc = re.search(r"(?:book|libro|volumen|volume|vol\.?|#)\s*([0-9]{1,3})", desc, re.I)
+                m_ordinal = re.search(r"\b(primera|segunda|tercera|cuarta|quinta|sexta|séptima|septima|octava|novena|décima|decima)\s+(?:entrega|novela|libro)\b", desc, re.I)
+                ordinal_map = {"primera": "1", "segunda": "2", "tercera": "3", "cuarta": "4", "quinta": "5", "sexta": "6", "séptima": "7", "septima": "7", "octava": "8", "novena": "9", "décima": "10", "decima": "10"}
+                if not saga_num:
+                    if m_desc:
+                        saga_num = m_desc.group(1)
+                        break
+                    elif m_ordinal:
+                        saga_num = ordinal_map.get(m_ordinal.group(1).lower(), "")
+                        break
+    except Exception:
+        pass
+
+if author:
+    book_title = strip_author_words(book_title, author)
+
+author = sanitize(author)
+saga_name = sanitize(title_case(saga_name))
+book_title = sanitize(title_case(book_title))
+
+if saga_num:
+    saga_num = f"{int(saga_num):03d}"
+
+if saga_name and saga_num:
+    folder_title = f"{saga_name} {saga_num} - {book_title}"
+elif saga_name:
+    folder_title = f"{saga_name} - {book_title}"
+else:
+    folder_title = book_title
+
+folder_title = sanitize(folder_title)
+
+if author:
+    target_dir = f"{base_dir}/{author}/{folder_title}"
+else:
+    target_dir = f"{base_dir}/{folder_title}"
+
+if ext:
+    target_file = f"{target_dir}/{folder_title}.{ext}"
+else:
+    target_file = f"{target_dir}/{folder_title}"
+
+print(f"TARGET_DIR:{target_dir}")
+print(f"TARGET_FILE:{target_file}")
+EOF_PYTHON
+
+    return 0
 }
 
 _get_online_movie_year() {
@@ -185,6 +475,39 @@ _find_local_movie_year() {
     return 1
 }
 
+_update_or_create_m3u() {
+    local target_dir=$1
+    local folder_title=$2
+
+    [[ ! -d "$target_dir" ]] && return 0
+
+    local m3u_file=$(find "$target_dir" -maxdepth 1 -type f -iname "*.m3u" | head -n 1)
+    local target_m3u="$target_dir/$folder_title.m3u"
+
+    if [[ -n "$m3u_file" ]]; then
+        sed -i.bak "s/\*/-/g; s/:/ -/g; s/[ ¿?¡!\"'\`]//g" "$m3u_file" 2>/dev/null
+        rm -f "${m3u_file}.bak"
+        if [[ "$m3u_file" != "$target_m3u" ]]; then
+            mv -f "$m3u_file" "$target_m3u"
+        fi
+    else
+        local audio_files=()
+        while IFS= read -r -d '' audio; do
+            audio_files+=("$(basename "$audio")")
+        done < <(find "$target_dir" -maxdepth 1 -type f \( -iname "*.mp3" -o -iname "*.m4b" -o -iname "*.m4a" -o -iname "*.flac" -o -iname "*.aac" -o -iname "*.ogg" -o -iname "*.wav" \) -print0 | sort -z)
+
+        if ((${#audio_files[@]} > 1)); then
+            {
+                echo "#EXTM3U"
+                for track in "${audio_files[@]}"; do
+                    echo "#EXTINF:-1,$track"
+                    echo "$track"
+                done
+            } > "$target_m3u"
+        fi
+    fi
+}
+
 _resolve_media_target() {
     local media_file=$1
     local base_dir=$2
@@ -196,6 +519,19 @@ _resolve_media_target() {
     if [[ "$filename_lower" =~ sample ]] && [[ "$ext" =~ ^(mkv|mp4|avi|mov|wmv)$ ]]; then
         echo "DELETE_SAMPLE:1"
         return 0
+    fi
+
+    # FOR AUDIOBOOKS (.m4b or audio collection)
+    if [[ "$ext" =~ ^(m4b)$ ]] || ([[ "$ext" =~ ^(mp3|m4a|flac|aac|ogg|wav|opus)$ ]] && [[ ! "$filename_lower" =~ s[0-9]{1,2}e[0-9]{1,2} ]]); then
+        local curr_dir=$(dirname -- "$media_file")
+        local video_count=$(find "$curr_dir" -maxdepth 2 -type f \( -iname "*.mkv" -o -iname "*.mp4" -o -iname "*.avi" -o -iname "*.mov" \) 2>/dev/null | wc -l)
+        if ((video_count == 0)); then
+            local parsed_output=""
+            if parsed_output=$(_parse_audiobook "$media_file" "$base_dir"); then
+                echo "$parsed_output"
+                return 0
+            fi
+        fi
     fi
 
     # FOR SUBTITLE FILES: Check if file explicitly contains movie/show name or climb tree
@@ -359,7 +695,7 @@ _generate_plan() {
                         fi
                     fi
                 fi
-            done < <(find "$item" -type f \( -iname "*.mkv" -o -iname "*.mp4" -o -iname "*.avi" -o -iname "*.mov" -o -iname "*.wmv" -o -iname "*.m4v" -o -iname "*.flv" -o -iname "*.ts" -o -iname "*.srt" -o -iname "*.ass" -o -iname "*.vtt" -o -iname "*.sub" -o -iname "*.idx" \) -print0 2>/dev/null)
+            done < <(find "$item" -type f \( -iname "*.mkv" -o -iname "*.mp4" -o -iname "*.avi" -o -iname "*.mov" -o -iname "*.wmv" -o -iname "*.m4v" -o -iname "*.flv" -o -iname "*.ts" -o -iname "*.srt" -o -iname "*.ass" -o -iname "*.vtt" -o -iname "*.sub" -o -iname "*.idx" -o -iname "*.m4b" -o -iname "*.mp3" -o -iname "*.m4a" -o -iname "*.flac" -o -iname "*.aac" -o -iname "*.ogg" -o -iname "*.wav" \) -print0 2>/dev/null)
         elif [[ -f "$item" ]]; then
             local parsed_output=""
 
@@ -411,7 +747,7 @@ _generate_plan() {
             echo -e "$deletions"
         fi
         echo "================================================================================"
-        echo "Press \"Apply Plan\" to proceed with these changes or \"Cancel\" to abort."
+        echo "Press \"Apply Plan\" to proceed with these changes or "Cancel" to abort."
     } > "$TEMP_DATA_TEXT_BOX"
 
     return "$((move_count + del_count))"
@@ -659,6 +995,7 @@ _clean_up_single_media() {
         if [[ -n "$target_dir" ]] && [[ -n "$target_file" ]] && [[ "$media_file" != "$target_file" ]]; then
             mkdir -p "$target_dir"
             _move_file "skip" "$media_file" "$target_file"
+            _update_or_create_m3u "$target_dir" "$(basename "$target_dir")"
         fi
     fi
 }
@@ -700,7 +1037,7 @@ _clean_up_item() {
         local media_files=()
         while IFS= read -r -d '' media; do
             media_files+=("$media")
-        done < <(find "$item" -type f \( -iname "*.mkv" -o -iname "*.mp4" -o -iname "*.avi" -o -iname "*.mov" -o -iname "*.wmv" -o -iname "*.m4v" -o -iname "*.flv" -o -iname "*.ts" -o -iname "*.srt" -o -iname "*.ass" -o -iname "*.vtt" -o -iname "*.sub" -o -iname "*.idx" \) -print0)
+        done < <(find "$item" -type f \( -iname "*.mkv" -o -iname "*.mp4" -o -iname "*.avi" -o -iname "*.mov" -o -iname "*.wmv" -o -iname "*.m4v" -o -iname "*.flv" -o -iname "*.ts" -o -iname "*.srt" -o -iname "*.ass" -o -iname "*.vtt" -o -iname "*.sub" -o -iname "*.idx" -o -iname "*.m4b" -o -iname "*.mp3" -o -iname "*.m4a" -o -iname "*.flac" -o -iname "*.aac" -o -iname "*.ogg" -o -iname "*.wav" \) -print0)
 
         for media in "${media_files[@]}"; do
             _clean_up_single_media "$media" "$base_dir" "$item"
