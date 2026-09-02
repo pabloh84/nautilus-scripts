@@ -39,6 +39,7 @@ _main() {
     # Export functions for parallel execution worker processes.
     export -f _main_task \
         _clean_up_item \
+        _is_release_folder \
         _clean_up_single_media \
         _resolve_media_target \
         _detect_sub_lang \
@@ -633,6 +634,37 @@ _resolve_media_target() {
     return 1
 }
 
+_is_release_folder() {
+    local dir=$1
+    local dir_name=$(basename -- "$dir")
+    local dir_lower="${dir_name,,}"
+
+    # Generic collection/category directory names are never single-release folders
+    if [[ "$dir_lower" =~ ^(peliculas|películas|movies|cine|series|tv|shows|tvshows|audiobooks|audiolibros|libros|books|descargas|downloads|torrents|complete|completos|musica|música|music|anime|documentales|documentaries)$ ]]; then
+        return 1
+    fi
+
+    # 1. TV show episode/season release folder (e.g. The.Ark.S03E03.1080p.x265-ELiTE or Silo.S03)
+    if [[ "$dir_lower" =~ s[0-9]{1,2}e[0-9]{1,2} ]] ||
+       [[ "$dir_lower" =~ [^0-9][0-9]{1,2}x[0-9]{1,2} ]] ||
+       [[ "$dir_lower" =~ (temp|temporada)[\._\ -]?[0-9]{1,2}.*(cap|episodio|ep)[\._\ -]?[0-9]{1,4} ]]; then
+        return 0
+    fi
+
+    # 2. Movie release folder with Year AND rip/quality/codec/group tags
+    if [[ "$dir_name" =~ (19[0-9]{2}|20[0-9]{2}) ]] &&
+       [[ "$dir_lower" =~ (1080p|720p|2160p|4k|uhd|bluray|bdrip|brrip|web-dl|webrip|hdtv|dvdrip|x264|x265|hevc|xvid|divx|remux|microhd|elite|rarbg|yts|eztv|tgx) ]]; then
+        return 0
+    fi
+
+    # 3. Folder name has quality/release tags (e.g. 1080p, x265, WEB-DL, etc.)
+    if [[ "$dir_lower" =~ (1080p|720p|2160p|4k|uhd|bluray|bdrip|brrip|web-dl|webrip|hdtv|dvdrip|x264|x265|hevc|xvid|divx|remux|microhd) ]]; then
+        return 0
+    fi
+
+    return 1
+}
+
 _generate_plan() {
     local input_files=$1
     local moves=""
@@ -649,7 +681,11 @@ _generate_plan() {
 
         local base_dir=""
         if [[ -d "$item" ]]; then
-            base_dir="$item"
+            if _is_release_folder "$item"; then
+                base_dir=$(dirname -- "$item")
+            else
+                base_dir="$item"
+            fi
         else
             base_dir=$(dirname -- "$item")
         fi
@@ -723,7 +759,7 @@ _generate_plan() {
                 fi
             fi
         fi
-    done <<<"$input_files"
+    done < <(tr "\r" "\n" <<<"$input_files")
 
     {
         echo "================================================================================"
@@ -1009,7 +1045,11 @@ _clean_up_item() {
 
     local base_dir=""
     if [[ -d "$item" ]]; then
-        base_dir="$item"
+        if _is_release_folder "$item"; then
+            base_dir=$(dirname -- "$item")
+        else
+            base_dir="$item"
+        fi
     else
         base_dir=$(dirname -- "$item")
     fi
