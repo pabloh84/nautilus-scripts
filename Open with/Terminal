@@ -48,6 +48,10 @@ _open_app() {
     # when '$input_files' is unquoted (IFS splits only on '$FIELD_SEPARATOR').
     set -f
     for input_file in $input_files; do
+        if [[ -n "$input_file" && ! -d "$input_file" ]]; then
+            input_file=$(dirname -- "$input_file")
+        fi
+
         # Detect if it's a remote 'sftp' path.
         if [[ "$input_file" == *"sftp:"* ]]; then
             local remote_host=""
