@@ -3066,6 +3066,8 @@ _get_files() {
         find_parameters="-maxdepth 0"
     fi
 
+    local raw_input_files="$input_files"
+
     # Pre-select the input files.
     input_files=$(_find_filtered_files \
         "$input_files" \
@@ -3080,9 +3082,24 @@ _get_files() {
     # working directory.
     if (($(_get_items_count "$input_files") == 0)); then
         if [[ "$par_type" == "directory" ]] && [[ -n "$par_max_items" ]]; then
-            # Return the current working directory if no files have been
-            # selected.
-            input_files=$(_get_working_directory)
+            if [[ -n "$raw_input_files" ]]; then
+                local dir_list=""
+                local file=""
+                for file in $raw_input_files; do
+                    local dir=""
+                    if [[ -d "$file" ]]; then
+                        dir="$file"
+                    else
+                        dir=$(dirname -- "$file")
+                    fi
+                    dir_list+="$dir$FIELD_SEPARATOR"
+                done
+                input_files=$(_str_sort "$dir_list" "$FIELD_SEPARATOR" "true")
+            else
+                # Return the current working directory if no files have been
+                # selected.
+                input_files=$(_get_working_directory)
+            fi
         fi
     fi
 

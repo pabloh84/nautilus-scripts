@@ -33,6 +33,9 @@ _build_tmux_session() {
     local first_session="true"
     local dir_1=""
     dir_1=$(_get_element "$input_files" "1")
+    if [[ -n "$dir_1" && ! -d "$dir_1" ]]; then
+        dir_1=$(dirname -- "$dir_1")
+    fi
 
     cd -- "$dir_1" || exit 1
     # Create a new tmux session in detached mode.
@@ -45,6 +48,10 @@ _build_tmux_session() {
     tmux bind = setw synchronize-panes
 
     for input_file in $input_files; do
+        if [[ -n "$input_file" && ! -d "$input_file" ]]; then
+            input_file=$(dirname -- "$input_file")
+        fi
+
         if [[ $first_session = "true" ]]; then
             first_session="false"
         else
