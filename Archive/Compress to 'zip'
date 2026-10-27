@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# install_keyboard_shortcut=<Control><Alt>Z
+# install_keyboard_shortcut=
 
 # Source the file '.common-functions.sh'.
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
