@@ -1,0 +1,210 @@
+#!/usr/bin/env bash
+# install_keyboard_shortcut=<Control><Alt>Z
+
+# Source the file '.common-functions.sh'.
+SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
+ROOT_DIR=$(grep --only-matching "^.*scripts[^/]*" <<<"$SCRIPT_DIR")
+source "$ROOT_DIR/.common-functions.sh"
+
+_main() {
+    local input_files=""
+    local output_dir=""
+    local items_count=0
+    local options=""
+    local selected_format=""
+    local format_ext=""
+    local requires_password=false
+    local default_name=""
+    local archive_name=""
+    local output_file=""
+    local std_output=""
+
+    # 1. Retrieve selected files/folders from file manager.
+    input_files=$(_get_files "par_type=all")
+    items_count=$(_get_items_count "$input_files")
+    if ((items_count == 0)); then
+        _exit_script
+    fi
+
+    # 2. Determine destination directory.
+    output_dir=$(_get_output_dir "par_use_same_dir=true")
+
+    # 3. Present format selection box (framework handles Zenity/Yad fallback internally).
+    options+="ZIP (.zip)"$'\n'
+    options+="ZIP with password (.zip)"$'\n'
+    options+="TAR.GZ (.tar.gz)"$'\n'
+    options+="TAR.XZ (.tar.xz)"$'\n'
+    options+="TAR.ZST (.tar.zst)"$'\n'
+    options+="7Z (.7z)"$'\n'
+    options+="7Z with password (.7z)"
+
+    selected_format=$(_display_select_box "$options" \
+        "--column:$(_i18n 'Archive Format')" \
+        "radiolist" "first" \
+        "$(_i18n 'Select archive format:')") || _exit_script
+
+    [[ -z "$selected_format" ]] && _exit_script
+
+    case "$selected_format" in
+    "ZIP (.zip)")
+        format_ext="zip"
+        requires_password=false
+        ;;
+    "ZIP with password (.zip)")
+        format_ext="zip"
+        requires_password=true
+        ;;
+    "TAR.GZ (.tar.gz)")
+        format_ext="tar.gz"
+        requires_password=false
+        ;;
+    "TAR.XZ (.tar.xz)")
+        format_ext="tar.xz"
+        requires_password=false
+        ;;
+    "TAR.ZST (.tar.zst)")
+        format_ext="tar.zst"
+        requires_password=false
+        ;;
+    "7Z (.7z)")
+        format_ext="7z"
+        requires_password=false
+        ;;
+    "7Z with password (.7z)")
+        format_ext="7z"
+        requires_password=true
+        ;;
+    *)
+        _exit_script
+        ;;
+    esac
+
+    # 4. Check dependencies for chosen format.
+    case "$format_ext" in
+    "zip")
+        if ! _command_exists "zip" && ! _command_exists "bsdtar"; then
+            _check_dependencies "7za"
+        fi
+        ;;
+    "tar.gz")
+        _check_dependencies "tar gunzip"
+        ;;
+    "tar.xz")
+        _check_dependencies "tar xz"
+        ;;
+    "tar.zst")
+        _check_dependencies "tar zstd"
+        ;;
+    "7z")
+        if ! _command_exists "7z" && ! _command_exists "7za"; then
+            _check_dependencies "7z"
+        fi
+        ;;
+    esac
+
+    # 5. If format requires password, prompt for it.
+    if [[ "$requires_password" == "true" ]]; then
+        TASK_PASSWORD=$(_display_password_box_define) || _exit_script
+        export TASK_PASSWORD
+        [[ -z "$TASK_PASSWORD" ]] && _exit_script
+    fi
+
+    # 6. Determine default suggested filename.
+    if ((items_count == 1)); then
+        local single_item=""
+        single_item=$(_get_element "$input_files" "1")
+        default_name=$(basename -- "$single_item")
+        if [[ -f "$single_item" ]]; then
+            default_name="${default_name%.*}"
+        fi
+    else
+        default_name=$(basename -- "$output_dir")
+        if [[ -z "$default_name" || "$default_name" == "/" || "$default_name" == "." ]]; then
+            default_name="Archive"
+        fi
+    fi
+
+    # 7. Prompt user for final archive filename.
+    archive_name=$(_display_input_text_box "$(_i18n 'Enter archive name:')" "$default_name") || _exit_script
+    [[ -z "$archive_name" ]] && _exit_script
+
+    # Ensure extension matches chosen format.
+    if [[ "$archive_name" != *".$format_ext" ]]; then
+        archive_name+=".$format_ext"
+    fi
+
+    output_file="$output_dir/$archive_name"
+    if [[ -e "$output_file" ]]; then
+        output_file=$(_get_filename_next_suffix "$output_file")
+    fi
+
+    # 8. Collect basenames of all selected items.
+    local -a basenames=()
+    local item=""
+    local i=1
+    for ((i = 1; i <= items_count; i++)); do
+        item=$(_get_element "$input_files" "$i")
+        [[ -z "$item" ]] && continue
+        basenames+=("$(basename -- "$item")")
+    done
+
+    # 9. Display wait dialog and execute compression in output_dir.
+    _display_wait_box ""
+    _directory_push "$output_dir" || return 1
+
+    __cmd_7z() {
+        if _command_exists "7z"; then
+            LC_ALL=C 7z "$@"
+        elif _command_exists "7za"; then
+            LC_ALL=C 7za "$@"
+        else
+            LC_ALL=C "$(compgen -c 7z | head -n 1)" "$@"
+        fi
+    }
+
+    case "$format_ext" in
+    "zip")
+        if [[ "$requires_password" == "true" ]]; then
+            if compgen -c 7z &>/dev/null; then
+                std_output=$(__cmd_7z a -snl -p"$TASK_PASSWORD" -mem=AES256 "$output_file" -- "${basenames[@]}" 2>&1)
+            elif _command_exists "zip"; then
+                std_output=$(zip --password "$TASK_PASSWORD" --symlinks --quiet --recurse-paths "$output_file" -- "${basenames[@]}" 2>&1)
+            fi
+        else
+            if compgen -c 7z &>/dev/null; then
+                std_output=$(__cmd_7z a -snl "$output_file" -- "${basenames[@]}" 2>&1)
+            elif _command_exists "bsdtar"; then
+                std_output=$(bsdtar -a -cf "$output_file" -- "${basenames[@]}" 2>&1)
+            elif _command_exists "zip"; then
+                std_output=$(zip --symlinks --quiet --recurse-paths "$output_file" -- "${basenames[@]}" 2>&1)
+            fi
+        fi
+        ;;
+    "tar.gz")
+        std_output=$(tar -czf "$output_file" -- "${basenames[@]}" 2>&1)
+        ;;
+    "tar.xz")
+        std_output=$(tar -cJf "$output_file" -- "${basenames[@]}" 2>&1)
+        ;;
+    "tar.zst")
+        std_output=$(tar --zstd -cf "$output_file" -- "${basenames[@]}" 2>&1)
+        ;;
+    "7z")
+        if [[ "$requires_password" == "true" ]]; then
+            std_output=$(__cmd_7z a -snl -mx9 -p"$TASK_PASSWORD" -mhe=on "$output_file" -- "${basenames[@]}" 2>&1)
+        else
+            std_output=$(__cmd_7z a -snl -mx9 "$output_file" -- "${basenames[@]}" 2>&1)
+        fi
+        ;;
+    esac
+
+    local first_item=""
+    first_item=$(_get_element "$input_files" "1")
+    _check_output "$?" "$std_output" "$first_item" "$output_file" || return 1
+    _directory_pop || return 1
+
+    # 10. Display completion message / consolidated errors.
+    _display_result_box "$output_dir"
+}
+
+_main "$@"
