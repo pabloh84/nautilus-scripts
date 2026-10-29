@@ -44,7 +44,6 @@ _main_task() {
     local input_file=$1
     local output_dir=$2
 
-    echo "treating [$input_file]"
     if [[ -d $input_file ]]; then
         echo "[$input_file] is a folder"
 

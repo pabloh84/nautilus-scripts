@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# shellcheck disable=SC1091,SC2001
+# shellcheck disable=SC1091,SC2001,SC2155
 
 # Source the script '.common-functions.sh'.
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
@@ -523,7 +523,7 @@ _resolve_media_target() {
     fi
 
     # FOR AUDIOBOOKS (.m4b or audio collection)
-    if [[ "$ext" =~ ^(m4b)$ ]] || ([[ "$ext" =~ ^(mp3|m4a|flac|aac|ogg|wav|opus)$ ]] && [[ ! "$filename_lower" =~ s[0-9]{1,2}e[0-9]{1,2} ]]); then
+    if [[ "$ext" =~ ^(m4b)$ ]] || { [[ "$ext" =~ ^(mp3|m4a|flac|aac|ogg|wav|opus)$ ]] && [[ ! "$filename_lower" =~ s[0-9]{1,2}e[0-9]{1,2} ]]; }; then
         local curr_dir=$(dirname -- "$media_file")
         local video_count=$(find "$curr_dir" -maxdepth 2 -type f \( -iname "*.mkv" -o -iname "*.mp4" -o -iname "*.avi" -o -iname "*.mov" \) 2>/dev/null | wc -l)
         if ((video_count == 0)); then
@@ -783,7 +783,7 @@ _generate_plan() {
             echo -e "$deletions"
         fi
         echo "================================================================================"
-        echo "Press \"Apply Plan\" to proceed with these changes or "Cancel" to abort."
+        echo "Press \"Apply Plan\" to proceed with these changes or \"Cancel\" to abort."
     } > "$TEMP_DATA_TEXT_BOX"
 
     return "$((move_count + del_count))"
@@ -1007,6 +1007,7 @@ _parse_movie() {
 _clean_up_single_media() {
     local media_file=$1
     local base_dir=$2
+    # shellcheck disable=SC2034
     local container_dir=$3
 
     local filename=$(basename -- "$media_file")
