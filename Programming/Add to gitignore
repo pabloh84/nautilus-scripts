@@ -67,7 +67,6 @@ _main_task()
              {
     local input_file=$1
     local output_dir=$2
-    local std_output=""
 
      input_get_filename_dir "$input_file"
 }

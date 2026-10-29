@@ -27,14 +27,9 @@ _main() {
 _main_task() {
     local input_file=$1
     local output_dir=$2
-    local dir=""
-    local filename=""
-
-    dir=$(dirname -- "$input_file")
-    filename=$(basename -- "$input_file")
 
     # Run the main process.
-    # _move_file "skip" "$input_file" "$dir/$filename".bak || return 1
+    # _move_file "skip" "$input_file" "$(dirname -- "$input_file")/$(basename -- "$input_file")".bak || return 1
     bak "$input_file"
 }
 

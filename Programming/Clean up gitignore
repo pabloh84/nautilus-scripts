@@ -12,7 +12,6 @@ source "$ROOT_DIR/.common-functions.sh"
 _main()
         {
     local input_files=""
-    local output_dir=""
 
     # Execute initial checks.
     # _check_dependencies "command=git"
@@ -93,8 +92,7 @@ _main()
         else
              # Remove the selected entries (in reverse order to avoid index issues after deletion)
              echo "Entries:" "${entries_to_remove[@]}"
-            IFS=$'\n' sorted_entries_to_remove=($(sort -nr <<<"${entries_to_remove[*]}"))
-            unset IFS
+            mapfile -t sorted_entries_to_remove < <(sort -nr <<<"${entries_to_remove[*]}")
             MESSAGE="The following entries have been remode from .gitignore:"$'\n'$'\n'
             for entry_index in "${sorted_entries_to_remove[@]}"; do
                 sed -i "$((entry_index + 1))d" "$gitignore_path" # Delete the line by index

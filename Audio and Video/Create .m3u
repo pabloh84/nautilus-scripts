@@ -15,8 +15,8 @@ _check_dependencies zenity || exit 1
 function create_m3u_file {
     __INPUT_FOLDER="$1"
     __OUTPUT_PLAYLIST="$2"
-    echo $__INPUT_FOLDER
-    echo $__OUTPUT_PLAYLIST
+    echo "$__INPUT_FOLDER"
+    echo "$__OUTPUT_PLAYLIST"
 
     if [ ! -d "$__INPUT_FOLDER" ]; then
         _log_error "Input folder not found."
@@ -33,14 +33,14 @@ function create_m3u_file {
         return 1
     fi
 
-    echo $__AUDIO_FILES
+    echo "${__AUDIO_FILES[*]}"
 
     echo "#EXTM3U" > "$__OUTPUT_PLAYLIST"
     # for __FILE in "$__AUDIO_FILES"; do
     for __FILE in "${__AUDIO_FILES[@]}"; do
         # Use basename to get the __FILE name without the path
         echo "#EXTINF:-1,$(basename "$__FILE")" >> "$__OUTPUT_PLAYLIST"
-        echo "$(basename "$__FILE")" >> "$__OUTPUT_PLAYLIST"
+        basename "$__FILE" >> "$__OUTPUT_PLAYLIST"
     done
 
     echo "Playlist created successfully: $__OUTPUT_PLAYLIST"
