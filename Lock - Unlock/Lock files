@@ -17,31 +17,31 @@ declare -a FILE_LIST
 
 for ENTRY in "${SELECTION_LIST[@]}"; do
 
-    echo "Treating ["$ENTRY"]"
+    echo "Treating [$ENTRY]"
     if [ -f "$ENTRY" ]; then
-        echo "["$ENTRY"] is a file"
+        echo "[$ENTRY] is a file"
         FILE_LIST+=("$ENTRY")
     elif [ -d "$ENTRY" ]; then
-        echo "["$ENTRY"] is directory"
+        echo "[$ENTRY] is directory"
         DIR_LIST+=("$ENTRY")
     fi
     echo
     echo
 done
 
-echo "Selected [${#DIR_LIST[@]}] directories: ${DIR_LIST[@]}"
+echo "Selected [${#DIR_LIST[@]}] directories: ${DIR_LIST[*]}"
 echo
 echo
-echo "Selected [${#FILE_LIST[@]}] files: ${FILE_LIST[@]}"
+echo "Selected [${#FILE_LIST[@]}] files: ${FILE_LIST[*]}"
 
-if [[ ${#DIR_LIST[@]} > 0 ]]; then
+if [[ ${#DIR_LIST[@]} -gt 0 ]]; then
     echo "Locking dirs"
     for DIR in "${DIR_LIST[@]}"; do
         sudo chattr -R +i "$DIR"
     done
 fi
 
-if [[ ${#FILE_LIST[@]} > 0 ]]; then
+if [[ ${#FILE_LIST[@]} -gt 0 ]]; then
     echo "Locking files"
     for file in "${FILE_LIST[@]}"; do
         sudo chattr +i "$file"

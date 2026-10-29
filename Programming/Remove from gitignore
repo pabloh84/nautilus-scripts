@@ -12,7 +12,6 @@ source "$ROOT_DIR/.common-functions.sh"
 _main()
         {
     local input_files=""
-    local output_dir=""
 
     # Execute initial checks.
     # _check_dependencies "command=git"
@@ -79,8 +78,6 @@ _main()
 _main_task()
              {
     local input_file=$1
-    local output_dir=$2
-    local std_output=""
 
      input_get_filename_dir "$input_file"
 
